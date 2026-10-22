@@ -13322,3 +13322,39 @@ msgstr "验证码有效期为 {seconds} 秒。"
 #: authentication/password_reset.py users/templates/users/forgot_password.html
 msgid "Service unavailable. Please try again later."
 msgstr "服务暂不可用，请稍后重试。"
+
+msgid "VCTK_S verification service URL"
+msgstr "VCTK_S 验签服务地址"
+
+msgid "Enter the full HTTP or HTTPS address of the VCTK_S verification service, without an API path."
+msgstr "填写 VCTK_S 验签服务的完整 HTTP 或 HTTPS 地址，不包含 API 路径。"
+
+msgid "PEM trust certificates for the HTTPS service, separate from the UKey issuing CA. Leave blank to keep the saved certificate."
+msgstr "用于 HTTPS 服务的 PEM 信任证书，与 UKey 签发 CA 独立。留空保留已保存证书。"
+
+msgid "VCTK_S trusted issuing CA"
+msgstr "VCTK_S 可信签发 CA"
+
+msgid "Upload one PEM CA certificate that directly issued the UKey certificate. Leave blank to keep the saved certificate."
+msgstr "上传直接签发 UKey 证书的单个 PEM CA 证书。留空保留已保存证书。"
+
+msgid "VCTK_S rejected the operation or returned an invalid response."
+msgstr "VCTK_S 拒绝操作或返回无效响应。"
+
+msgid "Invalid VCTK_S operation"
+msgstr "无效的 VCTK_S 操作"
+
+msgid "Invalid or timed out certificate service response"
+msgstr "证书服务响应无效或超时"
+
+msgid "Check the VCTK_S service URL, HTTPS trust settings and issuing CA certificate."
+msgstr "请检查 VCTK_S 服务地址、HTTPS 信任设置及签发 CA 证书。"
+
+msgid "VCTK_S certificate or signature verification failed."
+msgstr "VCTK_S 证书或签名校验失败。"
+
+msgid "VCTK_S server verification failed. Check the service settings."
+msgstr "VCTK_S 服务端验签失败，请检查服务配置。"
+
+msgid "VCTK_S version check passed. UKey signature and certificate verification have not been tested. Settings were not saved."
+msgstr "VCTK_S 版本接口检查通过，尚未验证 UKey 签名及证书，配置未保存。"

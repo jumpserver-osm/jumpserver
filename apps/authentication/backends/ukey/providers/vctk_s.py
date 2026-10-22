@@ -1,0 +1,61 @@
+"""JiDa's existing JIT Key client with remote VCTK_S verification."""
+from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
+
+from ..utils import detect_cert_algorithm
+from ..verifiers.vctk_s import VCTKSVerifier
+from .base import BaseCAProvider
+
+
+class VCTKSCAProvider(BaseCAProvider):
+    id = 'vctk_s'
+    label = 'VCTK_S'
+    binding_mode = 'user_sn'
+    supported_vendors = ('ji_da',)
+    supports_connection_test = True
+    expose_default_pin = True
+    sdk_sign_method = 'UKey_P7SignDetach'
+    settings_serializer = 'settings.serializers.auth.ukey.VCTKSCASettingSerializer'
+    secret_fields = (
+        'AUTH_UKEY_VCTK_S_TLS_CA_CERT', 'AUTH_UKEY_VCTK_S_ISSUING_CA',
+    )
+    connection_fields = (
+        'AUTH_UKEY_VCTK_S_SVS_URL', 'AUTH_UKEY_VCTK_S_TLS_VERIFY',
+        'AUTH_UKEY_VCTK_S_TLS_CA_CERT',
+    )
+    display_fields = connection_fields + ('AUTH_UKEY_VCTK_S_ISSUING_CA',)
+
+    @property
+    def ca_algorithm(self):
+        return detect_cert_algorithm(self.snapshot.get('AUTH_UKEY_VCTK_S_ISSUING_CA', '') or '')
+
+    @property
+    def sdk_digest_algorithm(self):
+        # RSA issuing CA key sizes need not match the UKey's key size.
+        return 4 if self.ca_algorithm.startswith('RSA-') else None
+
+    @property
+    def verifier(self):
+        return VCTKSVerifier(
+            self.snapshot.get('AUTH_UKEY_VCTK_S_SVS_URL', ''),
+            issuing_ca=self.snapshot.get('AUTH_UKEY_VCTK_S_ISSUING_CA', ''),
+            tls_verify=self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_VERIFY', 'system'),
+            tls_ca_cert=self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_CA_CERT', ''),
+            connect_timeout=self.snapshot.get('AUTH_UKEY_VCTK_S_CONNECT_TIMEOUT', 3),
+            read_timeout=self.snapshot.get('AUTH_UKEY_VCTK_S_READ_TIMEOUT', 5),
+        )
+
+    def validate_config(self):
+        if not self.snapshot['AUTH_UKEY']:
+            return
+        for field in ('AUTH_UKEY_VCTK_S_SVS_URL', 'AUTH_UKEY_VCTK_S_ISSUING_CA'):
+            if not self.snapshot.get(field):
+                raise ValidationError({field: _('This field is required.')})
+        if (self.snapshot['AUTH_UKEY_VCTK_S_SVS_URL'].lower().startswith('https://')
+                and self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_VERIFY', 'system') == 'custom'
+                and not self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_CA_CERT')):
+            raise ValidationError({'AUTH_UKEY_VCTK_S_TLS_CA_CERT': _('A CA certificate is required.')})
+        self.verifier.validate_config()
+
+    def test_connection(self):
+        return self.verifier.test_connection()

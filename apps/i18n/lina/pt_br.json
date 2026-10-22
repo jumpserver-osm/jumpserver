@@ -1868,5 +1868,13 @@
     "CommandFilterACLs": "Command filter ACLs",
     "UserActivity": "User activity",
     "SyslogAddr": "Syslog address",
-    "NasMountPath": "Caminho de montagem NAS"
+    "NasMountPath": "Caminho de montagem NAS",
+    "UKeyVCTKSHelp": "Use o cliente JIT UKey existente e verifique as assinaturas pelo serviço VCTK_S.",
+    "UKeyVCTKSServerURL": "URL do serviço de verificação VCTK_S",
+    "UKeyVCTKSServerHelp": "Informe o endereço HTTP/HTTPS completo do serviço VCTK_S, sem caminho, consulta ou fragmento.",
+    "UKeyVCTKSIssuingCA": "CA emissora confiável",
+    "UKeyVCTKSIssuingCAHelp": "Envie um certificado CA PEM que tenha emitido diretamente o certificado UKey. O conteúdo salvo não é exibido. Deixe o envio vazio para manter o certificado salvo.",
+    "UKeyVCTKSIssuingCAConfigured": "CA emissora configurada",
+    "UKeyVCTKSIssuingCANotConfigured": "CA emissora não configurada",
+    "UKeyVCTKSConnectionPassed": "A verificação de versão do VCTK_S foi concluída. A assinatura e o certificado UKey ainda não foram testados. As configurações não foram salvas."
 }

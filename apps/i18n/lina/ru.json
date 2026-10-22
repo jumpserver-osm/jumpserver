@@ -1869,5 +1869,13 @@
     "UserActivity": "User activity",
     "SyslogAddr": "Syslog address",
     "NasMountPath": "Путь монтирования NAS",
-    "UploadFileTooLarge": "Ошибка загрузки: файл слишком большой"
+    "UploadFileTooLarge": "Ошибка загрузки: файл слишком большой",
+    "UKeyVCTKSHelp": "Используйте существующий клиент JIT UKey и проверяйте подписи через службу VCTK_S.",
+    "UKeyVCTKSServerURL": "URL службы проверки VCTK_S",
+    "UKeyVCTKSServerHelp": "Введите полный HTTP/HTTPS-адрес службы VCTK_S без пути, параметров запроса и фрагмента.",
+    "UKeyVCTKSIssuingCA": "Доверенный выдающий УЦ",
+    "UKeyVCTKSIssuingCAHelp": "Загрузите один PEM-сертификат УЦ, непосредственно выдавшего сертификат UKey. Содержимое сохранённого сертификата не отображается. Оставьте поле пустым, чтобы сохранить текущий сертификат.",
+    "UKeyVCTKSIssuingCAConfigured": "Выдающий УЦ настроен",
+    "UKeyVCTKSIssuingCANotConfigured": "Выдающий УЦ не настроен",
+    "UKeyVCTKSConnectionPassed": "Проверка версии VCTK_S выполнена. Подпись и сертификат UKey не проверялись. Настройки не сохранены."
 }

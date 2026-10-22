@@ -169,6 +169,12 @@ class UKeySDKConfig:
         provider = self.provider
         if provider.sdk_profile:
             self._apply_provider_config(sdk_config, provider.sdk_profile)
+        if provider.sdk_sign_method:
+            signing_steps = [step for step in sdk_config['login']['steps']
+                             if step.get('name') == 'signChallenge']
+            if len(signing_steps) != 1:
+                raise ValueError('UKey SDK must contain exactly one challenge signing step')
+            signing_steps[0]['call'] = provider.sdk_sign_method
         trans_filter = self._build_trans_filter(sdk_config, lang)
         sdk_config = self._render(sdk_config, trans_filter)
         sdk_config = self._apply_internal_config_to_sdk_config(sdk_config)
@@ -227,6 +233,10 @@ class UKeySDKConfig:
                 resolved_config[k] = self._resolve_algo_branch(v, asym_alg_name)
             else:
                 resolved_config[k] = v
+
+        digest_algorithm = self.provider.sdk_digest_algorithm
+        if digest_algorithm is not None:
+            resolved_config['digestAlg'] = digest_algorithm
 
         # 追加后端专有字段（不在 YAML config 中配置）
         script_url = reverse('api-auth:ukey:ukey-sdk-script')

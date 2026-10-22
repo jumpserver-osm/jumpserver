@@ -1868,5 +1868,13 @@
     "CommandFilterACLs": "Command filter ACLs",
     "UserActivity": "User activity",
     "SyslogAddr": "Syslog address",
-    "NasMountPath": "Đường dẫn gắn NAS"
+    "NasMountPath": "Đường dẫn gắn NAS",
+    "UKeyVCTKSHelp": "Sử dụng ứng dụng JIT UKey hiện có và xác minh chữ ký qua dịch vụ VCTK_S.",
+    "UKeyVCTKSServerURL": "URL dịch vụ xác minh VCTK_S",
+    "UKeyVCTKSServerHelp": "Nhập địa chỉ HTTP/HTTPS đầy đủ của dịch vụ VCTK_S, không có đường dẫn, truy vấn hoặc đoạn.",
+    "UKeyVCTKSIssuingCA": "CA cấp chứng chỉ đáng tin cậy",
+    "UKeyVCTKSIssuingCAHelp": "Tải lên một chứng chỉ CA PEM đã trực tiếp cấp chứng chỉ UKey. Nội dung chứng chỉ đã lưu không được hiển thị. Để trống để giữ chứng chỉ đã lưu.",
+    "UKeyVCTKSIssuingCAConfigured": "Đã cấu hình CA cấp chứng chỉ",
+    "UKeyVCTKSIssuingCANotConfigured": "Chưa cấu hình CA cấp chứng chỉ",
+    "UKeyVCTKSConnectionPassed": "Kiểm tra phiên bản VCTK_S thành công. Chưa kiểm tra chữ ký và chứng chỉ UKey. Cấu hình chưa được lưu."
 }

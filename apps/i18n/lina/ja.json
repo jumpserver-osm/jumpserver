@@ -1872,5 +1872,13 @@
     "AccountAmount": "アカウント数",
     "AccountDiscoverList": "アカウントの収集",
     "BaseAccountDiscover": "アカウント収集",
-    "DataLastUsed": "さいごしようび"
+    "DataLastUsed": "さいごしようび",
+    "UKeyVCTKSHelp": "既存の JIT UKey クライアントを使用し、VCTK_S サービスで署名を検証します。",
+    "UKeyVCTKSServerURL": "VCTK_S 検証サービス URL",
+    "UKeyVCTKSServerHelp": "パス、クエリ、フラグメントを含めずに、VCTK_S サービスの完全な HTTP/HTTPS アドレスを入力してください。",
+    "UKeyVCTKSIssuingCA": "信頼する発行 CA",
+    "UKeyVCTKSIssuingCAHelp": "UKey 証明書を直接発行した PEM CA 証明書を 1 つアップロードしてください。保存済みの証明書は表示されません。空欄の場合は保存済みの証明書を維持します。",
+    "UKeyVCTKSIssuingCAConfigured": "発行 CA 設定済み",
+    "UKeyVCTKSIssuingCANotConfigured": "発行 CA 未設定",
+    "UKeyVCTKSConnectionPassed": "VCTK_S のバージョン確認に成功しました。UKey の署名および証明書の検証は未実施です。設定は保存されていません。"
 }

@@ -16,6 +16,8 @@ class BaseCAProvider:
     requires_certificate_selection = False
     expose_default_pin = False
     sdk_profile = None
+    sdk_sign_method = None
+    sdk_digest_algorithm = None
     algorithm_label = None
     settings_serializer = ''
     display_fields = ()

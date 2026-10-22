@@ -1855,5 +1855,13 @@
     "ArchiveDate": "Archive date",
     "Archive": "Archive",
     "BootstrapTokenTip": "The BOOTSTRAP_TOKEN value is used by panda, koko and other service components when registering.",
-    "GetToken": "Get token"
+    "GetToken": "Get token",
+    "UKeyVCTKSHelp": "Use the existing JIT UKey client and verify signatures through the VCTK_S service.",
+    "UKeyVCTKSServerURL": "VCTK_S verification service URL",
+    "UKeyVCTKSServerHelp": "Enter the full HTTP/HTTPS address of the VCTK_S service, without a path, query or fragment.",
+    "UKeyVCTKSIssuingCA": "Trusted issuing CA",
+    "UKeyVCTKSIssuingCAHelp": "Upload one PEM CA certificate that directly issued the UKey certificate. Saved certificate contents are not displayed. Leave the upload empty to keep the saved certificate.",
+    "UKeyVCTKSIssuingCAConfigured": "Issuing CA configured",
+    "UKeyVCTKSIssuingCANotConfigured": "Issuing CA not configured",
+    "UKeyVCTKSConnectionPassed": "VCTK_S version check passed. UKey signature and certificate verification have not been tested. Settings were not saved."
 }
