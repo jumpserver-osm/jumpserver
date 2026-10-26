@@ -175,6 +175,10 @@ class UKeySDKConfig:
             if len(signing_steps) != 1:
                 raise ValueError('UKey SDK must contain exactly one challenge signing step')
             signing_steps[0]['call'] = provider.sdk_sign_method
+        if provider.uses_one_time_challenge:
+            for step in sdk_config['login']['steps']:
+                if step.get('type') == 'submit':
+                    step['fields']['challenge_id'] = '{{ challenge.id }}'
         trans_filter = self._build_trans_filter(sdk_config, lang)
         sdk_config = self._render(sdk_config, trans_filter)
         sdk_config = self._apply_internal_config_to_sdk_config(sdk_config)
@@ -240,7 +244,7 @@ class UKeySDKConfig:
 
         # 追加后端专有字段（不在 YAML config 中配置）
         script_url = reverse('api-auth:ukey:ukey-sdk-script')
-        if self.provider.binding_mode == 'certificate':
+        if self.provider.uses_one_time_challenge:
             script_url += '?' + urlencode({
                 'vendor': self.snapshot['AUTH_UKEY_VENDOR'], 'revision': self.snapshot[REVISION],
             })

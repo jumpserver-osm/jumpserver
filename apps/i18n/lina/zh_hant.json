@@ -1886,5 +1886,10 @@
     "UKeyVCTKSIssuingCAHelp": "上傳直接簽發 UKey 憑證的單個 PEM CA 憑證。已儲存的憑證內容不會顯示，未上傳新憑證時保留原憑證。",
     "UKeyVCTKSIssuingCAConfigured": "已設定簽發 CA",
     "UKeyVCTKSIssuingCANotConfigured": "尚未設定簽發 CA",
-    "UKeyVCTKSConnectionPassed": "VCTK_S 版本介面檢查通過，尚未驗證 UKey 簽章及憑證，設定未儲存。"
+    "UKeyVCTKSConnectionPassed": "VCTK_S 隨機數介面檢查通過，尚未驗證 UKey 簽章及憑證，設定未儲存。",
+    "UKeyVCTKSAuthorizationUsername": "業務授權使用者名稱",
+    "UKeyVCTKSAuthorizationPassword": "業務授權密碼",
+    "UKeyVCTKSAuthorizationHelp": "僅在 VCTK_S 服務啟用業務授權時填寫；使用者名稱留空表示不使用業務授權。",
+    "UKeyVCTKSAuthorizationPasswordHelp": "留空保留已儲存的密碼。",
+    "UKeyVCTKSAuthorizationAdvanced": "進階：業務授權（選填）"
 }

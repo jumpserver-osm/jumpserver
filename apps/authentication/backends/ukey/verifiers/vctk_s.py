@@ -2,7 +2,7 @@
 import re
 from datetime import datetime, timezone
 
-from asn1crypto import cms, pem
+from asn1crypto import cms, core, pem
 from django.utils.translation import gettext_lazy as _
 
 from common.utils import get_logger
@@ -30,9 +30,18 @@ class VCTKSCertificateSet(cms.CertificateSet):
     _child_spec = VCTKSCertificateChoices
 
 
+class VCTKSDataContentInfo(cms.ContentInfo):
+    _oid_specs = {**cms.ContentInfo._oid_specs, '1.2.156.10197.6.1.4.2.1': core.OctetString}
+
+
 class VCTKSSignedData(cms.SignedData):
     _fields = [(name, VCTKSCertificateSet if name == 'certificates' else spec, *options)
                for name, spec, *options in cms.SignedData._fields]
+
+    def _encap_content_info_spec(self):
+        return VCTKSDataContentInfo if self['version'].native == 'v1' else cms.EncapsulatedContentInfo
+
+    _spec_callbacks = {'encap_content_info': _encap_content_info_spec}
 
 
 class VCTKSContentInfo(cms.ContentInfo):
@@ -92,17 +101,17 @@ def _signer_matches(sid, certificate):
             and sid.chosen.native == certificate.key_identifier)
 
 
-def check_detached_signer(signature, certificate):
+def check_attached_signer(signature, certificate, message):
     if not isinstance(signature, bytes) or not 1 <= len(signature) <= MAX_P7_SIZE:
         raise ValueError('Invalid P7 signature size')
     content = strict_der(VCTKSContentInfo, signature)
     if content['content_type'].dotted not in SIGNED_DATA_OIDS:
-        raise ValueError('Detached SignedData required')
+        raise ValueError('Attached SignedData required')
     signed = content['content']
     encapsulated = signed['encap_content_info']
     if (encapsulated['content_type'].dotted not in DATA_OIDS
-            or encapsulated['content'].native is not None):
-        raise ValueError('Detached data required')
+            or encapsulated['content'].native != message):
+        raise ValueError('Attached content differs from challenge')
     signers = signed['signer_infos']
     if len(signers) != 1:
         raise ValueError('Exactly one signer required')
@@ -120,15 +129,17 @@ def check_detached_signer(signature, certificate):
             or {item['algorithm'].dotted for item in signed['digest_algorithms']} != {expected_digest}
             or not signer['signature'].native):
         raise ValueError('Incorrect P7 signing algorithm')
+    return 'sm3' if expected_digest == SM3_OID else 'sha256'
 
 
 class VCTKSVerifier(BaseVerifier):
     def __init__(self, url='', *, issuing_ca='', tls_verify='system', tls_ca_cert='',
-                 connect_timeout=3, read_timeout=5):
+                 connect_timeout=3, read_timeout=5, username='', password=''):
         self.issuing_ca = issuing_ca
         self.connection = dict(
             url=url, tls_verify=tls_verify, tls_ca_cert=tls_ca_cert,
             connect_timeout=connect_timeout, read_timeout=read_timeout,
+            username=username, password=password,
         )
 
     def _client(self):
@@ -140,19 +151,19 @@ class VCTKSVerifier(BaseVerifier):
             load_issuing_ca(self.issuing_ca)
         except Exception:
             raise UKeyAuthError(_(
-                'Check the VCTK_S service URL, HTTPS trust settings and issuing CA certificate.'
+                'Check the VCTK_S service URL, business authorization, HTTPS trust settings and issuing CA certificate.'
             )) from None
 
     def verify_proof(self, cert, signature, challenge, username=''):
         stage = 'parse'
         try:
-            if not isinstance(challenge, str) or not re.fullmatch('[0-9a-f]{32}', challenge):
+            if not isinstance(challenge, str) or not re.fullmatch('[0-9a-f]{64}', challenge):
                 raise ValueError('Invalid challenge')
             certificate = checked_certificate(decode_base64(cert, MAX_CERT))
             signature_bytes = decode_base64(signature, MAX_P7_SIZE)
             issuer = load_issuing_ca(self.issuing_ca)
             stage = 'signer_identity'
-            check_detached_signer(signature_bytes, certificate)
+            digest = check_attached_signer(signature_bytes, certificate, challenge.encode('ascii'))
             stage = 'certificate_trust'
             if (certificate.issuer.dump() != issuer.subject.dump()
                     or (certificate.authority_key_identifier is not None and issuer.key_identifier is not None
@@ -165,19 +176,25 @@ class VCTKSVerifier(BaseVerifier):
             logger.warning('VCTK_S proof rejected: stage=%s exception=%s', stage, type(exc).__name__)
             raise UKeyAuthError(_('VCTK_S certificate or signature verification failed.')) from None
         try:
-            self._client().verify_signed_data(challenge, signature)
+            result = self._client().verify_signed_data(signature, digest)
+            if (result['plain'] != challenge.encode('ascii')
+                    or result['certificate'] != certificate.dump()):
+                raise ValueError('Returned content or certificate differs from submitted proof')
         except Exception as exc:
             logger.warning('VCTK_S proof rejected: stage=server exception=%s', type(exc).__name__)
             raise UKeyServiceError(_('VCTK_S server verification failed. Check the service settings.')) from None
         return claims
 
-    def test_connection(self):
+    def generate_challenge(self):
         try:
-            self._client().get_version()
+            return self._client().generate_random().hex()
         except SVSError as exc:
             raise UKeyServiceError(str(exc)) from None
+
+    def test_connection(self):
+        self.generate_challenge()
         return {
             'connection': True, 'verification': False,
-            'msg': _('VCTK_S version check passed. UKey signature and certificate verification '
+            'msg': _('VCTK_S random generation check passed. UKey signature and certificate verification '
                      'have not been tested. Settings were not saved.'),
         }

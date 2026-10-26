@@ -8,17 +8,23 @@ from http.client import BadStatusLine
 from unittest.mock import MagicMock, patch
 
 from authentication.backends.ukey.clients.fisherman import MAX_RESPONSE, SVSError
-from authentication.backends.ukey.clients.vctk_s import MAX_MESSAGE_SIZE, MAX_P7_SIZE, VCTKSClient
+from authentication.backends.ukey.clients.vctk_s import MAX_P7_SIZE, VCTKSClient
 
 
 CLIENT_MODULE = 'authentication.backends.ukey.clients.vctk_s'
 TRANSPORT_MODULE = 'authentication.backends.ukey.clients.fisherman'
 URL = 'http://192.168.10.5:8000'
-CHALLENGE = '0123456789abcdef' * 2
+CHALLENGE = '0123456789abcdef' * 4
 SIGNATURE = base64.b64encode(b'P7 proof bytes\xfb\xff').decode('ascii')
 
 
-def http_response(data=b'{"error":"0","value":""}'):
+def http_response(data=None):
+    if data is None:
+        data = json.dumps({'code': '0', 'message': '', 'data': {
+            'plain': base64.b64encode(CHALLENGE.encode()).decode(),
+            'certinfo': {'dscert': base64.b64encode(b'certificate').decode()},
+            'digestalg': 'SHA256',
+        }}).encode()
     response = MagicMock()
     response.__enter__.return_value = response
     response.status, response.length = 200, 0
@@ -28,118 +34,105 @@ def http_response(data=b'{"error":"0","value":""}'):
 
 
 class VCTKSProtocolTests(unittest.TestCase):
-    def test_exact_zero_and_void_result(self):
+    def test_exact_success_codes_and_invalid_envelopes(self):
         for code in (0, '0'):
-            with self.subTest(code=code):
-                self.assertEqual(VCTKSClient._decode_response(
-                    json.dumps({'error': code, 'value': ''}).encode(), 'JITGVerifyDetachedSignStr',
-                ), '')
-
-    def test_ambiguous_success_is_rejected(self):
-        for code in (False, True, None, 0.0, '00', ' 0', '+0', '', 1, '3758096470'):
+            self.assertEqual(VCTKSClient._decode_response(json.dumps({
+                'code': code, 'message': '', 'data': {'version': 'v1'},
+            }).encode()), {'version': 'v1'})
+        for code in (False, True, None, 0.0, '00', ' 0', '+0', '', 1):
             with self.subTest(code=code), self.assertRaises(SVSError):
-                VCTKSClient._decode_response(
-                    json.dumps({'error': code, 'value': ''}).encode(), 'JITGVerifyDetachedSignStr',
-                )
-        for value in ('init faild', 'OK', 'true', False, None, 0, {}):
-            with self.subTest(value=value), self.assertRaises(SVSError):
-                VCTKSClient._decode_response(
-                    json.dumps({'error': 0, 'value': value}).encode(), 'JITGVerifyDetachedSignStr',
-                )
+                VCTKSClient._decode_response(json.dumps({
+                    'code': code, 'message': 'sensitive error', 'data': {},
+                }).encode())
+        for data in (b'{}', b'[]', b'null', b'{"code":0}', b'\xff',
+                     b'{"code":1,"code":0,"message":"","data":{}}',
+                     b'{"code":0,"message":"","data":null}',
+                     b'{"code":0,"message":"","data":{"plain":"a","plain":"b"}}'):
+            with self.subTest(data=data), self.assertRaises(SVSError):
+                VCTKSClient._decode_response(data)
 
-    def test_malformed_duplicate_extra_or_missing_fields_are_rejected(self):
-        for body in (
-            b'{}', b'[]', b'null', b'{"error":0}', b'\xff', b'{"error":0,"value":""}junk',
-            b'{"error":1,"error":0,"value":""}', b'{"error":0,"value":"","value":""}',
-            b'{"error":0,"value":"","unexpected":true}',
-        ):
-            with self.subTest(body=body), self.assertRaises(SVSError):
-                VCTKSClient._decode_response(body, 'JITGVerifyDetachedSignStr')
-
-    def test_version_check_requires_a_version_result(self):
-        for version in ('2.2.7.1', '1.0', 'v1.2.3', 'VCTK_S V4.0', 'V2.2.7.1 (Linux)'):
-            with self.subTest(version=version):
-                self.assertEqual(VCTKSClient._decode_response(
-                    json.dumps({'error': '0', 'value': version}).encode(), 'JITGetVersion',
-                ), version)
-        for value in ('getversion faild', '', 'success', '<html>', '1.0\n', '1' * 129):
-            with self.subTest(value=value), self.assertRaises(SVSError):
-                VCTKSClient._decode_response(
-                    json.dumps({'error': 0, 'value': value}).encode(), 'JITGetVersion',
-                )
-
-    def test_version_query_uses_only_the_version_operation(self):
-        client = VCTKSClient(URL)
-        connection = MagicMock()
-        connection.getresponse.return_value = http_response(b'{"error":0,"value":"2.2.7.1"}')
-        with patch.object(client, '_connect', return_value=connection):
-            self.assertEqual(client.get_version(), '2.2.7.1')
-        self.assertEqual(connection.request.call_count, 1)
-        args, kwargs = connection.request.call_args
-        self.assertEqual(args, ('POST', '/'))
-        self.assertEqual(json.loads(kwargs['body']), {'name': 'JITGetVersion'})
-        connection.close.assert_called_once()
-
-    def test_verification_sends_one_request_with_original_p7_and_challenge(self):
-        for message in (CHALLENGE, CHALLENGE.encode('ascii')):
-            client = VCTKSClient(URL)
+    def test_random_generation_and_optional_authorization_headers(self):
+        for username, password in (('', ''), ('business', 'secret'), ('', 'saved-secret')):
+            client = VCTKSClient(URL, username=username, password=password)
             connection = MagicMock()
-            connection.getresponse.return_value = http_response()
-            with self.subTest(message_type=type(message).__name__), patch.object(
-                client, '_connect', return_value=connection,
-            ):
-                client.verify_signed_data(message, SIGNATURE)
-            self.assertEqual(connection.request.call_count, 1)
+            random = bytes(range(32))
+            connection.getresponse.return_value = http_response(json.dumps({
+                'code': 0, 'message': '', 'data': {
+                    'randomResult': base64.b64encode(random).decode(),
+                },
+            }).encode())
+            with patch.object(client, '_connect', return_value=connection):
+                self.assertEqual(client.generate_random(), random)
             args, kwargs = connection.request.call_args
-            self.assertEqual(args, ('POST', '/'))
-            self.assertEqual(kwargs['headers'], {
-                'Content-Type': 'text/plain;charset=UTF-8',
-                'Accept': 'application/json', 'Connection': 'close',
-            })
-            self.assertEqual(json.loads(kwargs['body']), {
-                'name': 'JITGVerifyDetachedSignStr', 'p1': SIGNATURE, 'p2': CHALLENGE,
-            })
+            self.assertEqual(args, ('POST', '/api/v1/generateRandom'))
+            self.assertEqual(json.loads(kwargs['body']), {'randomlength': '32'})
+            headers = kwargs['headers']
+            self.assertEqual(headers['messagetype'], 'json')
+            self.assertRegex(headers['serialnumber'], r'^[0-9a-f]{32}$')
+            self.assertEqual(headers['Content-Type'], 'application/json;charset=UTF-8')
+            self.assertNotIn('token', headers)
+            if username:
+                self.assertEqual((headers['une'], headers['pwd']), (username, password))
+            else:
+                self.assertNotIn('une', headers)
+                self.assertNotIn('pwd', headers)
             connection.close.assert_called_once()
 
-    def test_maximum_p7_fits_request_and_is_preserved(self):
+    def test_random_length_and_encoding_fail_closed(self):
         client = VCTKSClient(URL)
-        signature = base64.b64encode(b'x' * MAX_P7_SIZE).decode('ascii')
+        invalid = [None, [], '!', '', base64.b64encode(b'x' * 31).decode(),
+                   base64.b64encode(b'x' * 33).decode(), 'mVvRR+O7eAAc']
+        for value in invalid:
+            with self.subTest(value=value), patch.object(
+                client, '_request', return_value={'randomResult': value},
+            ), self.assertRaises(SVSError):
+                client.generate_random()
+
+    def test_attached_verification_wire_and_result(self):
+        client = VCTKSClient(URL)
         connection = MagicMock()
         connection.getresponse.return_value = http_response()
         with patch.object(client, '_connect', return_value=connection):
-            client.verify_signed_data(CHALLENGE, signature)
-        body = connection.request.call_args.kwargs['body']
-        self.assertLess(len(body), MAX_RESPONSE)
-        self.assertEqual(json.loads(body)['p1'], signature)
+            result = client.verify_signed_data(SIGNATURE, 'sha256')
+        self.assertEqual(result, {'plain': CHALLENGE.encode(), 'certificate': b'certificate'})
+        connection.request.assert_called_once()
+        args, kwargs = connection.request.call_args
+        self.assertEqual(args, ('POST', '/api/v1/attachverifysign'))
+        self.assertEqual(json.loads(kwargs['body']), {'signdata': SIGNATURE, 'digestalg': 'sha256'})
+        connection.close.assert_called_once()
 
-    def test_invalid_proof_inputs_never_connect(self):
+    def test_invalid_returned_plain_certificate_or_digest_is_rejected(self):
         client = VCTKSClient(URL)
-        invalid_pairs = [
-            ('', SIGNATURE), (None, SIGNATURE), (False, SIGNATURE),
-            ('a' * (MAX_MESSAGE_SIZE + 1), SIGNATURE), ('\0', SIGNATURE),
-            (b'\xff', SIGNATURE), ('\u00e9', SIGNATURE),
-            (CHALLENGE, ''), (CHALLENGE, None), (CHALLENGE, 'bad base64!'),
-            (CHALLENGE, SIGNATURE + '\n'),
-            (CHALLENGE, base64.b64encode(b'x' * (MAX_P7_SIZE + 1)).decode('ascii')),
-        ]
-        for message, signature in invalid_pairs:
-            with self.subTest(message_type=type(message).__name__), patch.object(
-                client, '_connect',
-            ) as connect, self.assertRaises(SVSError):
-                client.verify_signed_data(message, signature)
+        valid = {'plain': base64.b64encode(CHALLENGE.encode()).decode(),
+                 'certinfo': {'dscert': base64.b64encode(b'cert').decode()}, 'digestalg': 'sha256'}
+        for changed in ({'plain': None}, {'plain': '!'}, {'certinfo': {}},
+                        {'certinfo': None}, {'digestalg': 'sha1'}, {'digestalg': None}):
+            with self.subTest(changed=changed), patch.object(
+                client, '_request', return_value={**valid, **changed},
+            ), self.assertRaises(SVSError):
+                client.verify_signed_data(SIGNATURE, 'sha256')
+
+    def test_invalid_inputs_never_connect(self):
+        client = VCTKSClient(URL)
+        for signature, digest in (('', 'sha256'), (SIGNATURE, 'sha1'), (None, 'sm3'),
+                                  (SIGNATURE + '\n', 'sm3'),
+                                  (base64.b64encode(b'x' * (MAX_P7_SIZE + 1)).decode(), 'sm3')):
+            with patch.object(client, '_connect') as connect, self.assertRaises(SVSError):
+                client.verify_signed_data(signature, digest)
             connect.assert_not_called()
+        for username, password in (('user', ''), ('user\r\nHeader: bad', 'pass'),
+                                   ('user', 'pass\n'), ('user', 'a' * 257)):
+            with self.assertRaises(SVSError):
+                VCTKSClient(URL, username=username, password=password)
 
-    def test_request_size_and_unavailable_operations_fail_before_connection(self):
+    def test_unsupported_operation_and_oversized_request_never_connect(self):
         client = VCTKSClient(URL)
-        invalid_calls = [
-            ('JITGVerifyDetachedSignStr', ('x' * MAX_RESPONSE, CHALLENGE)),
-            ('JITGetVersion', ('unexpected',)), ('UnknownOperation', ()),
-        ]
-        for endpoint, params in invalid_calls:
-            with self.subTest(endpoint=endpoint), patch.object(
-                client, '_connect',
-            ) as connect, self.assertRaises(SVSError):
-                client._request(endpoint, params)
+        for operation, params in (
+            ('JITGetVersion', {}), ('RegisterParam', {}), ('generateRandom', {}),
+            ('attachverifysign', {'signdata': 'a' * MAX_RESPONSE, 'digestalg': 'sm3'}),
+        ):
+            with patch.object(client, '_connect') as connect, self.assertRaises(SVSError):
+                client._request(operation, params)
             connect.assert_not_called()
 
 
@@ -193,7 +186,7 @@ class VCTKSTransportTests(unittest.TestCase):
             with self.subTest(kind=kind), patch.object(
                 client, '_connect', return_value=connection,
             ) as connect, self.assertRaises(SVSError) as error:
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
             connect.assert_called_once()
             connection.request.assert_called_once()
             connection.close.assert_called_once()
@@ -207,7 +200,7 @@ class VCTKSTransportTests(unittest.TestCase):
             CLIENT_MODULE + '.threading.Timer',
         ) as timer, patch(CLIENT_MODULE + '.time.monotonic', side_effect=[10, 16]):
             with self.assertRaises(SVSError):
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
         timer.assert_called_once_with(5, client._abort_response, args=(connection.sock,))
         timer.return_value.start.assert_called_once()
         timer.return_value.cancel.assert_called_once()
@@ -217,7 +210,7 @@ class VCTKSTransportTests(unittest.TestCase):
         client = VCTKSClient(URL)
         with patch.object(client, '_connect', side_effect=OSError('sensitive input')):
             with self.assertRaises(SVSError) as error:
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
         self.assertNotIn('sensitive input', str(error.exception))
 
     def test_cleanup_error_does_not_expose_exception_text(self):
@@ -227,7 +220,7 @@ class VCTKSTransportTests(unittest.TestCase):
         connection.close.side_effect = OSError('sensitive input')
         with patch.object(client, '_connect', return_value=connection):
             with self.assertRaises(SVSError) as error:
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
         self.assertNotIn('sensitive input', str(error.exception))
 
     def test_https_connects_only_to_resolved_ip_and_keeps_hostname_for_tls(self):
@@ -267,7 +260,7 @@ class VCTKSTransportTests(unittest.TestCase):
             TRANSPORT_MODULE + '.socket.socket',
         ) as socket_factory:
             with self.assertRaises(SVSError):
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
         socket_factory.assert_not_called()
 
     def test_all_resolved_addresses_are_validated_before_connecting(self):
@@ -280,5 +273,5 @@ class VCTKSTransportTests(unittest.TestCase):
             TRANSPORT_MODULE + '.socket.socket',
         ) as socket_factory:
             with self.assertRaises(SVSError):
-                client.verify_signed_data(CHALLENGE, SIGNATURE)
+                client.verify_signed_data(SIGNATURE, 'sha256')
         socket_factory.assert_not_called()

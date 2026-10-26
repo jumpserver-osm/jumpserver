@@ -28,9 +28,14 @@ class BaseCAProvider:
         self.snapshot = snapshot
 
     @property
+    def uses_one_time_challenge(self):
+        return self.binding_mode == 'certificate'
+
+    @property
     def capabilities(self):
         return {
             'binding_mode': self.binding_mode,
+            'uses_one_time_challenge': self.uses_one_time_challenge,
             'supports_enrollment': self.supports_enrollment,
             'supports_connection_test': self.supports_connection_test,
             'requires_certificate_selection': self.requires_certificate_selection,

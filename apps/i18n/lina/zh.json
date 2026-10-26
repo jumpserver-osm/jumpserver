@@ -1874,5 +1874,10 @@
     "UKeyVCTKSIssuingCAHelp": "上传直接签发 UKey 证书的单个 PEM CA 证书。已保存的证书内容不回显，未上传新证书时保留原证书。",
     "UKeyVCTKSIssuingCAConfigured": "已配置签发 CA",
     "UKeyVCTKSIssuingCANotConfigured": "尚未配置签发 CA",
-    "UKeyVCTKSConnectionPassed": "VCTK_S 版本接口检查通过，尚未验证 UKey 签名及证书，配置未保存。"
+    "UKeyVCTKSConnectionPassed": "VCTK_S 随机数接口检查通过，尚未验证 UKey 签名及证书，配置未保存。",
+    "UKeyVCTKSAuthorizationUsername": "业务授权用户名",
+    "UKeyVCTKSAuthorizationPassword": "业务授权密码",
+    "UKeyVCTKSAuthorizationHelp": "仅当 VCTK_S 服务开启业务授权时填写；用户名留空表示不使用业务授权。",
+    "UKeyVCTKSAuthorizationPasswordHelp": "留空保留已保存的密码。",
+    "UKeyVCTKSAuthorizationAdvanced": "高级：业务授权（可选）"
 }

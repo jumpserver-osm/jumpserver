@@ -1880,5 +1880,10 @@
     "UKeyVCTKSIssuingCAHelp": "UKey 証明書を直接発行した PEM CA 証明書を 1 つアップロードしてください。保存済みの証明書は表示されません。空欄の場合は保存済みの証明書を維持します。",
     "UKeyVCTKSIssuingCAConfigured": "発行 CA 設定済み",
     "UKeyVCTKSIssuingCANotConfigured": "発行 CA 未設定",
-    "UKeyVCTKSConnectionPassed": "VCTK_S のバージョン確認に成功しました。UKey の署名および証明書の検証は未実施です。設定は保存されていません。"
+    "UKeyVCTKSConnectionPassed": "VCTK_S の乱数生成確認に成功しました。UKey の署名および証明書の検証は未実施です。設定は保存されていません。",
+    "UKeyVCTKSAuthorizationUsername": "業務認証ユーザー名",
+    "UKeyVCTKSAuthorizationPassword": "業務認証パスワード",
+    "UKeyVCTKSAuthorizationHelp": "VCTK_S サービスで業務認証が有効な場合のみ入力します。ユーザー名を空にすると業務認証を使用しません。",
+    "UKeyVCTKSAuthorizationPasswordHelp": "空欄の場合、保存済みのパスワードを保持します。",
+    "UKeyVCTKSAuthorizationAdvanced": "詳細：業務認証（任意）"
 }

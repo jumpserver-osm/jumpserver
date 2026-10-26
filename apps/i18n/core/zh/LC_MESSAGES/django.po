@@ -13358,3 +13358,48 @@ msgstr "VCTK_S 服务端验签失败，请检查服务配置。"
 
 msgid "VCTK_S version check passed. UKey signature and certificate verification have not been tested. Settings were not saved."
 msgstr "VCTK_S 版本接口检查通过，尚未验证 UKey 签名及证书，配置未保存。"
+
+msgid "Check the VCTK_S service URL, business authorization, HTTPS trust settings and issuing CA certificate."
+msgstr "请检查 VCTK_S 服务地址、业务授权、HTTPS 信任设置及签发 CA 证书。"
+
+msgid "Invalid VCTK_S business authorization credentials."
+msgstr "VCTK_S 业务授权凭据无效，请使用不含控制字符的 ASCII 用户名和密码。"
+
+msgid "VCTK_S business authorization requires a password."
+msgstr "填写 VCTK_S 业务授权用户名时必须提供密码。"
+
+msgid "VCTK_S returned an unexpected random number length."
+msgstr "VCTK_S 返回的随机数长度不符合要求。"
+
+msgid "Invalid VCTK_S signing algorithm."
+msgstr "VCTK_S 签名算法无效。"
+
+msgid "VCTK_S returned an invalid verification result."
+msgstr "VCTK_S 返回的验签结果无效。"
+
+msgid "Business authorization username"
+msgstr "业务授权用户名"
+
+msgid "Business authorization password"
+msgstr "业务授权密码"
+
+msgid "Only required when the service enables business authorization. Leave blank to disable it."
+msgstr "仅服务开启业务授权时需要；用户名留空表示不使用业务授权。"
+
+msgid "Leave blank to keep the saved password."
+msgstr "留空保留已保存的密码。"
+
+msgid "Invalid or expired UKey challenge"
+msgstr "UKey 挑战码无效或已过期，请刷新页面重试"
+
+msgid "UKey challenge has already been used"
+msgstr "UKey 挑战码已使用，请刷新页面重试"
+
+msgid "UKey configuration changed; refresh and retry"
+msgstr "UKey 配置已变更，请刷新页面重试"
+
+msgid "Too many UKey challenges; try again later"
+msgstr "UKey 挑战码请求过于频繁，请稍后重试"
+
+msgid "VCTK_S random generation check passed. UKey signature and certificate verification have not been tested. Settings were not saved."
+msgstr "VCTK_S 随机数接口检查通过，尚未验证 UKey 签名及证书，配置未保存。"

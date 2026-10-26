@@ -1877,5 +1877,10 @@
     "UKeyVCTKSIssuingCAHelp": "Загрузите один PEM-сертификат УЦ, непосредственно выдавшего сертификат UKey. Содержимое сохранённого сертификата не отображается. Оставьте поле пустым, чтобы сохранить текущий сертификат.",
     "UKeyVCTKSIssuingCAConfigured": "Выдающий УЦ настроен",
     "UKeyVCTKSIssuingCANotConfigured": "Выдающий УЦ не настроен",
-    "UKeyVCTKSConnectionPassed": "Проверка версии VCTK_S выполнена. Подпись и сертификат UKey не проверялись. Настройки не сохранены."
+    "UKeyVCTKSConnectionPassed": "Проверка генерации случайных чисел VCTK_S выполнена. Подпись и сертификат UKey не проверялись. Настройки не сохранены.",
+    "UKeyVCTKSAuthorizationUsername": "Имя пользователя авторизации сервиса",
+    "UKeyVCTKSAuthorizationPassword": "Пароль авторизации сервиса",
+    "UKeyVCTKSAuthorizationHelp": "Требуется только при включенной авторизации сервиса VCTK_S. Пустое имя пользователя отключает авторизацию.",
+    "UKeyVCTKSAuthorizationPasswordHelp": "Оставьте пустым, чтобы сохранить текущий пароль.",
+    "UKeyVCTKSAuthorizationAdvanced": "Дополнительно: авторизация сервиса (необязательно)"
 }

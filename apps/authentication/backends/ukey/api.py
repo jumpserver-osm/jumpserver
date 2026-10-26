@@ -44,7 +44,7 @@ class UKeySDKScriptFileAPIView(APIView):
         sdk = UKeySDKConfig(snapshot)
         # Builtin clients may use the original URL without version parameters.
         # When supplied, still reject a driver from another configuration.
-        versioned = sdk.provider.binding_mode == 'certificate' or any(
+        versioned = sdk.provider.uses_one_time_challenge or any(
             name in request.query_params for name in ('vendor', 'revision')
         )
         if versioned and (request.query_params.get('vendor') != snapshot['AUTH_UKEY_VENDOR']

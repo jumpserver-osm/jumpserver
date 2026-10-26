@@ -560,10 +560,11 @@
                     return { code: code, code_base64: code_base64, length: code.length };
                 }())
             };
-            var usesCertificateBinding = (ctx.config.capabilities || {}).binding_mode === 'certificate';
-            if (usesCertificateBinding) ctx.challenge.id = '{{ challenge_id|default:""|escapejs }}';
+            var usesOneTimeChallenge = (ctx.config.capabilities || {}).uses_one_time_challenge;
+            if (usesOneTimeChallenge) ctx.challenge.id = '{{ challenge_id|default:""|escapejs }}';
             if (!ctx.challenge.code ||
-                (usesCertificateBinding && ctx.config.revision !== '{{ ukey_revision|default:""|escapejs }}') ||
+                (usesOneTimeChallenge && (!ctx.challenge.id ||
+                    ctx.config.revision !== '{{ ukey_revision|default:""|escapejs }}')) ||
                 ctx.config.provider !== '{{ ukey_provider|default:""|escapejs }}') {
                 throw new Error('{% trans "UKey settings have changed or the service is unavailable. Refresh the page and try again." %}');
             }
@@ -594,7 +595,7 @@
             if (selectsCertificate) usernameDisplay.parentElement.style.display = 'none';
             function checkConfig() {
                 if (refreshRequired) return Promise.reject(new Error(MSG.configChanged));
-                if ((ctx.config.capabilities || {}).binding_mode !== 'certificate') return Promise.resolve();
+                if (!(ctx.config.capabilities || {}).uses_one_time_challenge) return Promise.resolve();
                 return fetch(API_CONFIG + '?revision_only=1', { cache: 'no-store' }).then(function (response) {
                     if (!response.ok) throw new Error(MSG.sdkError);
                     return response.json();

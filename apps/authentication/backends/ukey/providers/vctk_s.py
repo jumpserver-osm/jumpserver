@@ -11,17 +11,20 @@ class VCTKSCAProvider(BaseCAProvider):
     id = 'vctk_s'
     label = 'VCTK_S'
     binding_mode = 'user_sn'
+    uses_one_time_challenge = True
     supported_vendors = ('ji_da',)
     supports_connection_test = True
     expose_default_pin = True
-    sdk_sign_method = 'UKey_P7SignDetach'
+    sdk_sign_method = 'UKey_P7SignAttach'
     settings_serializer = 'settings.serializers.auth.ukey.VCTKSCASettingSerializer'
     secret_fields = (
         'AUTH_UKEY_VCTK_S_TLS_CA_CERT', 'AUTH_UKEY_VCTK_S_ISSUING_CA',
+        'AUTH_UKEY_VCTK_S_PASSWORD',
     )
     connection_fields = (
         'AUTH_UKEY_VCTK_S_SVS_URL', 'AUTH_UKEY_VCTK_S_TLS_VERIFY',
         'AUTH_UKEY_VCTK_S_TLS_CA_CERT',
+        'AUTH_UKEY_VCTK_S_USERNAME', 'AUTH_UKEY_VCTK_S_PASSWORD',
     )
     display_fields = connection_fields + ('AUTH_UKEY_VCTK_S_ISSUING_CA',)
 
@@ -43,6 +46,8 @@ class VCTKSCAProvider(BaseCAProvider):
             tls_ca_cert=self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_CA_CERT', ''),
             connect_timeout=self.snapshot.get('AUTH_UKEY_VCTK_S_CONNECT_TIMEOUT', 3),
             read_timeout=self.snapshot.get('AUTH_UKEY_VCTK_S_READ_TIMEOUT', 5),
+            username=self.snapshot.get('AUTH_UKEY_VCTK_S_USERNAME', ''),
+            password=self.snapshot.get('AUTH_UKEY_VCTK_S_PASSWORD', ''),
         )
 
     def validate_config(self):
@@ -59,3 +64,6 @@ class VCTKSCAProvider(BaseCAProvider):
 
     def test_connection(self):
         return self.verifier.test_connection()
+
+    def generate_challenge(self):
+        return self.verifier.generate_challenge()

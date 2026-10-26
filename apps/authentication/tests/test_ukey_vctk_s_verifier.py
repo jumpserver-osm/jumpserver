@@ -21,7 +21,7 @@ from authentication.backends.ukey.verifiers import vctk_s
 from authentication.backends.ukey.verifiers.builtin import BuiltinVerifier
 
 
-CHALLENGE = 'a1' * 16
+CHALLENGE = 'a1' * 32
 URL = 'http://192.168.10.5:8000'
 
 
@@ -80,7 +80,10 @@ def sm2_p7_structure(certificate, *, gm=False, chain=()):
         'content_type': '1.2.156.10197.6.1.4.2.2' if gm else 'signed_data',
         'content': {
             'version': 'v1', 'digest_algorithms': [{'algorithm': vctk_s.SM3_OID}],
-            'encap_content_info': {'content_type': '1.2.156.10197.6.1.4.2.1' if gm else 'data'},
+            'encap_content_info': {
+                'content_type': '1.2.156.10197.6.1.4.2.1' if gm else 'data',
+                'content': CHALLENGE.encode(),
+            },
             'certificates': [
                 vctk_s.VCTKSCertificateChoices(name='certificate', value=item)
                 for item in [*chain, certificate]
@@ -112,7 +115,7 @@ class VCTKSVerifierTests(TestCase):
         cls.signature = encode(cls.p7)
 
     @classmethod
-    def sign_p7(cls, certificate, message=CHALLENGE, *, attached=False):
+    def sign_p7(cls, certificate, message=CHALLENGE, *, attached=True):
         options = [pkcs7.PKCS7Options.Binary]
         if not attached:
             options.append(pkcs7.PKCS7Options.DetachedSignature)
@@ -125,7 +128,9 @@ class VCTKSVerifierTests(TestCase):
     def setUp(self):
         self.verifier = vctk_s.VCTKSVerifier(URL, issuing_ca=self.ca_pem)
 
-    def verify_rsa_p7(self, message, signature):
+    def verify_rsa_p7(self, signature, digest_algorithm):
+        self.assertEqual(digest_algorithm, 'sha256')
+        message = CHALLENGE
         """Independent test double for the remote service's cryptographic check."""
         signer = cms.ContentInfo.load(base64.b64decode(signature))['content']['signer_infos'][0]
         attributes = signer['signed_attrs']
@@ -138,21 +143,31 @@ class VCTKSVerifierTests(TestCase):
             padding.PKCS1v15(), hashes.SHA256(),
         )
 
+        return {'plain': CHALLENGE.encode(), 'certificate': self.asn1_cert.dump()}
+
     def test_real_rsa_p7_with_chain_preserves_existing_identity(self):
         with patch.object(self.verifier, '_client') as client:
             client.return_value.verify_signed_data.side_effect = self.verify_rsa_p7
             claims = self.verifier.verify_proof(self.cert, self.signature, CHALLENGE, 'user')
         self.assertEqual(claims, {'subject_cn': 'user'})
-        client.return_value.verify_signed_data.assert_called_once_with(CHALLENGE, self.signature)
+        client.return_value.verify_signed_data.assert_called_once_with(self.signature, 'sha256')
 
-    def test_remote_failure_or_changed_challenge_cannot_authenticate(self):
-        for message in ('b2' * 16, CHALLENGE):
-            with self.subTest(message=message), patch.object(self.verifier, '_client') as client:
-                client.return_value.verify_signed_data.side_effect = (
-                    self.verify_rsa_p7 if message != CHALLENGE else SVSError('Rejected')
-                )
+    def test_changed_challenge_is_rejected_before_remote_verification(self):
+        with patch.object(self.verifier, '_client') as client, self.assertRaises(UKeyAuthError):
+            self.verifier.verify_proof(self.cert, self.signature, 'b2' * 32, 'user')
+        client.assert_not_called()
+
+    def test_remote_failure_or_returned_content_substitution_cannot_authenticate(self):
+        for response in (SVSError('Rejected'),
+                         {'plain': b'wrong', 'certificate': self.asn1_cert.dump()},
+                         {'plain': CHALLENGE.encode(), 'certificate': b'wrong'}):
+            with self.subTest(response=response), patch.object(self.verifier, '_client') as client:
+                if isinstance(response, Exception):
+                    client.return_value.verify_signed_data.side_effect = response
+                else:
+                    client.return_value.verify_signed_data.return_value = response
                 with self.assertRaises(UKeyServiceError):
-                    self.verifier.verify_proof(self.cert, self.signature, message, 'user')
+                    self.verifier.verify_proof(self.cert, self.signature, CHALLENGE, 'user')
                 client.return_value.verify_signed_data.assert_called_once()
 
     def test_wrong_username_is_rejected_before_remote_verification(self):
@@ -207,11 +222,11 @@ class VCTKSVerifierTests(TestCase):
     def test_substituting_submitted_certificate_cannot_use_another_p7_signer(self):
         other = issue_certificate(self.key, issuer_key=self.ca_key, issuer=self.ca, serial=456)
         with self.assertRaises(ValueError):
-            vctk_s.check_detached_signer(
-                self.p7, Certificate.load(other.public_bytes(serialization.Encoding.DER)),
+            vctk_s.check_attached_signer(
+                self.p7, Certificate.load(other.public_bytes(serialization.Encoding.DER)), CHALLENGE.encode(),
             )
 
-    def test_detached_signer_requires_one_unambiguous_matching_certificate(self):
+    def test_attached_signer_requires_one_unambiguous_matching_certificate(self):
         for kind in ('wrong_sid', 'multiple_signers', 'missing_signer', 'missing_certificates',
                      'duplicate_signing_certificate', 'wrong_digest', 'empty_signature'):
             content = vctk_s.VCTKSContentInfo.load(self.p7)
@@ -233,16 +248,16 @@ class VCTKSVerifierTests(TestCase):
             else:
                 signed['signer_infos'][0]['signature'] = b''
             with self.subTest(kind=kind), self.assertRaises(ValueError):
-                vctk_s.check_detached_signer(content.dump(force=True), self.asn1_cert)
+                vctk_s.check_attached_signer(content.dump(force=True), self.asn1_cert, CHALLENGE.encode())
 
-    def test_attached_raw_or_truncated_vendor_example_is_rejected(self):
+    def test_detached_raw_or_truncated_vendor_example_is_rejected(self):
         for data in (
-            self.sign_p7(self.leaf, attached=True),
+            self.sign_p7(self.leaf, attached=False),
             self.key.sign(CHALLENGE.encode(), padding.PKCS1v15(), hashes.SHA256()),
             base64.b64decode('MIIDUQYKKoEcz1UGAQQCAqCCA0EwggM9gECAghUh=='),
         ):
             with self.subTest(size=len(data)), self.assertRaises(ValueError):
-                vctk_s.check_detached_signer(data, self.asn1_cert)
+                vctk_s.check_attached_signer(data, self.asn1_cert, CHALLENGE.encode())
 
     def test_subject_key_identifier_signer_is_resolved(self):
         content = vctk_s.VCTKSContentInfo.load(self.p7)
@@ -250,10 +265,10 @@ class VCTKSVerifierTests(TestCase):
         signer = content['content']['signer_infos'][0]
         signer['version'] = 'v3'
         signer['sid'] = {'subject_key_identifier': self.asn1_cert.key_identifier}
-        vctk_s.check_detached_signer(content.dump(force=True), self.asn1_cert)
+        vctk_s.check_attached_signer(content.dump(force=True), self.asn1_cert, CHALLENGE.encode())
         signer['sid'] = {'subject_key_identifier': b'wrong'}
         with self.assertRaises(ValueError):
-            vctk_s.check_detached_signer(content.dump(force=True), self.asn1_cert)
+            vctk_s.check_attached_signer(content.dump(force=True), self.asn1_cert, CHALLENGE.encode())
 
     def test_config_accepts_rsa_issuing_ca_but_not_leaf_bundle_or_expired_ca(self):
         self.verifier.validate_config()
@@ -264,10 +279,10 @@ class VCTKSVerifierTests(TestCase):
             with self.subTest(size=len(value)), self.assertRaises(ValueError):
                 vctk_s.load_issuing_ca(value)
 
-    def test_connection_test_only_checks_version(self):
+    def test_connection_test_only_checks_random_generation(self):
         with patch.object(self.verifier, '_client') as client:
             result = self.verifier.test_connection()
-        client.return_value.get_version.assert_called_once_with()
+        client.return_value.generate_random.assert_called_once_with()
         client.return_value.verify_signed_data.assert_not_called()
         self.assertTrue(result['connection'])
         self.assertFalse(result['verification'])
@@ -291,8 +306,8 @@ class VCTKSSM2StructureTests(TestCase):
                 leaf = sm2_structure(direct_oid=direct_oid)
                 ca = sm2_structure(ca=True, direct_oid=direct_oid)
                 with self.subTest(gm=gm, direct_oid=direct_oid):
-                    vctk_s.check_detached_signer(
-                        sm2_p7_structure(leaf, gm=gm, chain=(ca,)).dump(), leaf,
+                    vctk_s.check_attached_signer(
+                        sm2_p7_structure(leaf, gm=gm, chain=(ca,)).dump(), leaf, CHALLENGE.encode(),
                     )
                     loaded = vctk_s.load_issuing_ca(pem.armor('CERTIFICATE', ca.dump()).decode())
                     self.assertEqual(vctk_s.certificate_algorithm(loaded), 'sm2')

@@ -1876,5 +1876,10 @@
     "UKeyVCTKSIssuingCAHelp": "Cargue un certificado CA PEM que haya emitido directamente el certificado UKey. No se muestra el contenido guardado. Deje la carga vacía para conservar el certificado guardado.",
     "UKeyVCTKSIssuingCAConfigured": "CA emisora configurada",
     "UKeyVCTKSIssuingCANotConfigured": "CA emisora sin configurar",
-    "UKeyVCTKSConnectionPassed": "La comprobación de versión de VCTK_S se completó. No se han probado la firma ni el certificado UKey. La configuración no se ha guardado."
+    "UKeyVCTKSConnectionPassed": "La comprobación de generación de números aleatorios VCTK_S se completó. No se han probado la firma ni el certificado UKey. La configuración no se ha guardado.",
+    "UKeyVCTKSAuthorizationUsername": "Usuario de autorización del servicio",
+    "UKeyVCTKSAuthorizationPassword": "Contraseña de autorización del servicio",
+    "UKeyVCTKSAuthorizationHelp": "Solo es necesario cuando el servicio VCTK_S tiene habilitada la autorización. Deje el usuario vacío para deshabilitarla.",
+    "UKeyVCTKSAuthorizationPasswordHelp": "Deje el campo vacío para conservar la contraseña guardada.",
+    "UKeyVCTKSAuthorizationAdvanced": "Avanzado: autorización del servicio (opcional)"
 }

@@ -24,6 +24,15 @@ def validate_svs_url(value):
 
 
 class VCTKSCASettingSerializer(serializers.Serializer):
+    AUTH_UKEY_VCTK_S_USERNAME = serializers.CharField(
+        required=False, allow_blank=True, max_length=256, label=_('Business authorization username'),
+        help_text=_('Only required when the service enables business authorization. Leave blank to disable it.'),
+    )
+    AUTH_UKEY_VCTK_S_PASSWORD = EncryptedField(
+        required=False, allow_blank=True, max_length=256, trim_whitespace=False,
+        label=_('Business authorization password'),
+        help_text=_('Leave blank to keep the saved password.'),
+    )
     AUTH_UKEY_VCTK_S_SVS_URL = serializers.CharField(
         required=False, allow_blank=True, max_length=2048,
         label=_('VCTK_S verification service URL'), validators=[validate_svs_url],

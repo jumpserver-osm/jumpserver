@@ -1863,5 +1863,10 @@
     "UKeyVCTKSIssuingCAHelp": "Upload one PEM CA certificate that directly issued the UKey certificate. Saved certificate contents are not displayed. Leave the upload empty to keep the saved certificate.",
     "UKeyVCTKSIssuingCAConfigured": "Issuing CA configured",
     "UKeyVCTKSIssuingCANotConfigured": "Issuing CA not configured",
-    "UKeyVCTKSConnectionPassed": "VCTK_S version check passed. UKey signature and certificate verification have not been tested. Settings were not saved."
+    "UKeyVCTKSConnectionPassed": "VCTK_S random generation check passed. UKey signature and certificate verification have not been tested. Settings were not saved.",
+    "UKeyVCTKSAuthorizationUsername": "Business authorization username",
+    "UKeyVCTKSAuthorizationPassword": "Business authorization password",
+    "UKeyVCTKSAuthorizationHelp": "Only required when the VCTK_S service enables business authorization. Leave the username blank to disable it.",
+    "UKeyVCTKSAuthorizationPasswordHelp": "Leave blank to keep the saved password.",
+    "UKeyVCTKSAuthorizationAdvanced": "Advanced: business authorization (optional)"
 }

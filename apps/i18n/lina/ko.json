@@ -1876,5 +1876,10 @@
     "UKeyVCTKSIssuingCAHelp": "UKey 인증서를 직접 발급한 PEM CA 인증서 하나를 업로드하세요. 저장된 인증서 내용은 표시되지 않습니다. 비워 두면 저장된 인증서를 유지합니다.",
     "UKeyVCTKSIssuingCAConfigured": "발급 CA 설정됨",
     "UKeyVCTKSIssuingCANotConfigured": "발급 CA 설정되지 않음",
-    "UKeyVCTKSConnectionPassed": "VCTK_S 버전 확인을 통과했습니다. UKey 서명 및 인증서 검증은 테스트하지 않았습니다. 설정은 저장되지 않았습니다."
+    "UKeyVCTKSConnectionPassed": "VCTK_S 난수 생성 확인을 통과했습니다. UKey 서명 및 인증서 검증은 테스트하지 않았습니다. 설정은 저장되지 않았습니다.",
+    "UKeyVCTKSAuthorizationUsername": "업무 인증 사용자 이름",
+    "UKeyVCTKSAuthorizationPassword": "업무 인증 비밀번호",
+    "UKeyVCTKSAuthorizationHelp": "VCTK_S 서비스에서 업무 인증이 활성화된 경우에만 입력합니다. 사용자 이름을 비워 두면 업무 인증을 사용하지 않습니다.",
+    "UKeyVCTKSAuthorizationPasswordHelp": "비워 두면 저장된 비밀번호를 유지합니다.",
+    "UKeyVCTKSAuthorizationAdvanced": "고급: 업무 인증(선택 사항)"
 }
