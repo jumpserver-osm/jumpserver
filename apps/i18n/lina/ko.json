@@ -1873,7 +1873,7 @@
     "UKeyVCTKSServerURL": "VCTK_S 검증 서비스 URL",
     "UKeyVCTKSServerHelp": "경로, 쿼리 또는 프래그먼트 없이 VCTK_S 서비스의 전체 HTTP/HTTPS 주소를 입력하세요.",
     "UKeyVCTKSIssuingCA": "신뢰할 발급 CA",
-    "UKeyVCTKSIssuingCAHelp": "UKey 인증서를 직접 발급한 PEM CA 인증서 하나를 업로드하세요. 저장된 인증서 내용은 표시되지 않습니다. 비워 두면 저장된 인증서를 유지합니다.",
+    "UKeyVCTKSIssuingCAHelp": "UKey 인증서를 직접 발급한 CA를 포함하여 신뢰할 수 있는 CA 인증서를 최대 16개 담은 PEM 파일(최대 64 KB)을 업로드하세요. 인증서 순서는 무관합니다. 만료되었거나 아직 유효하지 않은 CA는 로그인 검증에 사용하지 않습니다. 비워 두면 저장된 파일을 유지합니다.",
     "UKeyVCTKSIssuingCAConfigured": "발급 CA 설정됨",
     "UKeyVCTKSIssuingCANotConfigured": "발급 CA 설정되지 않음",
     "UKeyVCTKSConnectionPassed": "VCTK_S 난수 생성 확인을 통과했습니다. UKey 서명 및 인증서 검증은 테스트하지 않았습니다. 설정은 저장되지 않았습니다.",

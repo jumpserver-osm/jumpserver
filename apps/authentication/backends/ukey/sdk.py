@@ -57,6 +57,9 @@ class UKeySDKConfig:
         if vendor == 'long_mai' and self.provider.binding_mode == 'certificate':
             with open(self._vendor_path('xjca_adapter.js'), 'rb') as adapter:
                 return cache[vendor] + b'\n' + adapter.read()
+        if self.provider.sdk_digest_from_certificate:
+            with open(self._vendor_path('vctks_certificate.js'), 'rb') as adapter:
+                return cache[vendor] + b'\n' + adapter.read()
         return cache[vendor]
 
     def load_sdk_config_content(self):
@@ -175,6 +178,11 @@ class UKeySDKConfig:
             if len(signing_steps) != 1:
                 raise ValueError('UKey SDK must contain exactly one challenge signing step')
             signing_steps[0]['call'] = provider.sdk_sign_method
+            if provider.sdk_digest_from_certificate:
+                signing_steps[0]['digest_certificate'] = '{{ ukey.cert }}'
+                # Re-read the signing certificate after PIN, immediately before signing.
+                index = sdk_config['login']['steps'].index(signing_steps[0])
+                sdk_config['login']['steps'][index:index] = deepcopy(sdk_config['login']['detect']['steps'])
         if provider.uses_one_time_challenge:
             for step in sdk_config['login']['steps']:
                 if step.get('type') == 'submit':

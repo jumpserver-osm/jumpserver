@@ -260,6 +260,7 @@
         signing:      '{% trans "Signing challenge code..." %}',
         signFail:     '{% trans "Signing failed" %}',
         certFail:     '{% trans "Failed to retrieve UKey cert" %}',
+        certAlgorithm: '{% trans "Unsupported or invalid UKey signing certificate" %}',
         noCN:         '{% trans "No UKey cert detected, please contact administrator" %}'
     };
 
@@ -454,6 +455,13 @@
         }
         var args = (step.args || []).map(function (a) { return resolve(a, ctx); });
         var result;
+        if (step.digest_certificate) {
+            try {
+                args[0] = window.VCTKSCertificateDigest(resolve(step.digest_certificate, ctx));
+            } catch (_) {
+                return Promise.reject(new Error(MSG.certAlgorithm));
+            }
+        }
         try {
             result = api[methodName].apply(api, args);
         } catch (e) {

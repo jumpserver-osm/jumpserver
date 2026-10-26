@@ -51,10 +51,11 @@ class VCTKSCASettingSerializer(serializers.Serializer):
                     'Leave blank to keep the saved certificate.'),
     )
     AUTH_UKEY_VCTK_S_ISSUING_CA = EncryptedField(
-        required=False, allow_blank=True, max_length=32768,
+        required=False, allow_blank=True, max_length=65536,
         label=_('VCTK_S trusted issuing CA'),
-        help_text=_('Upload one PEM CA certificate that directly issued the UKey certificate. '
-                    'Leave blank to keep the saved certificate.'),
+        help_text=_('Upload a PEM file containing up to 16 trusted CA certificates (maximum 64 KB). '
+                    'Include the CA that directly issued the UKey certificate; order does not matter. '
+                    'Expired or not-yet-valid CAs are not used for login. Leave blank to keep the saved file.'),
     )
 
 

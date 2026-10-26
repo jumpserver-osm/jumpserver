@@ -13335,8 +13335,50 @@ msgstr "用于 HTTPS 服务的 PEM 信任证书，与 UKey 签发 CA 独立。�
 msgid "VCTK_S trusted issuing CA"
 msgstr "VCTK_S 可信签发 CA"
 
-msgid "Upload one PEM CA certificate that directly issued the UKey certificate. Leave blank to keep the saved certificate."
-msgstr "上传直接签发 UKey 证书的单个 PEM CA 证书。留空保留已保存证书。"
+msgid "Upload a PEM file containing up to 16 trusted CA certificates (maximum 64 KB). Include the CA that directly issued the UKey certificate; order does not matter. Expired or not-yet-valid CAs are not used for login. Leave blank to keep the saved file."
+msgstr "上传包含最多 16 张可信 CA 证书的 PEM 文件（最大 64 KB），需包含直接签发 UKey 用户证书的 CA，顺序不限。过期或尚未生效的 CA 不用于登录校验。留空保留已保存文件。"
+
+msgid "Upload a PEM CA certificate file of at most 64 KB."
+msgstr "请上传最大 64 KB 的 PEM 格式 CA 证书文件。"
+
+msgid "Upload at most 16 CA certificates."
+msgstr "最多支持上传 16 张 CA 证书。"
+
+msgid "Invalid PEM content before CA certificate %(index)d."
+msgstr "第 %(index)d 张 CA 证书之前存在无效的 PEM 内容。"
+
+msgid "CA certificate %(index)d: %(reason)s."
+msgstr "第 %(index)d 张 CA 证书：%(reason)s。"
+
+msgid "Invalid or unsupported CA certificate"
+msgstr "CA 证书格式无效或不受支持"
+
+msgid "Incorrect certificate role (CA or user certificate)"
+msgstr "证书角色不正确，请上传具有 CA 属性的 CA 证书"
+
+msgid "Incorrect certificate key usage"
+msgstr "证书的密钥用途不符合要求"
+
+msgid "Invalid PEM CA certificate file or trailing content."
+msgstr "PEM CA 证书文件格式无效，或证书后存在多余内容。"
+
+msgid "At least one trusted CA certificate must currently be valid."
+msgstr "至少需要一张当前处于有效期内的可信 CA 证书。"
+
+msgid "No valid trusted CA could verify the UKey certificate."
+msgstr "未找到能够验证该 UKey 用户证书的有效可信 CA，请检查签发 CA 及其有效期。"
+
+msgid "Unsupported or invalid UKey signing certificate"
+msgstr "UKey 签名证书无效或其公钥算法不受支持"
+
+msgid "Unsupported issuing CA or signing certificate algorithm"
+msgstr "CA 或用户签名证书的公钥算法不受支持"
+
+msgid "Duplicate certificate extension"
+msgstr "证书包含重复的扩展属性"
+
+msgid "Cross-algorithm CA issuance is not supported."
+msgstr "暂不支持 CA 与用户证书采用不同公钥算法的签发组合。"
 
 msgid "VCTK_S rejected the operation or returned an invalid response."
 msgstr "VCTK_S 拒绝操作或返回无效响应。"

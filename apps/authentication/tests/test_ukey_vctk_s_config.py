@@ -50,7 +50,9 @@ class SDKCompatibilityTests(SimpleTestCase):
     def test_reuses_original_jida_script_detection_pin_and_submit(self):
         builtin = UKeySDKConfig(snapshot(AUTH_UKEY_CA_PROVIDER='builtin'))
         remote = UKeySDKConfig(snapshot())
-        self.assertEqual(builtin.load_sdk_script_content(), remote.load_sdk_script_content())
+        self.assertTrue(remote.load_sdk_script_content().startswith(builtin.load_sdk_script_content()))
+        self.assertIn(b'VCTKSCertificateDigest', remote.load_sdk_script_content())
+        self.assertNotIn(b'VCTKSCertificateDigest', builtin.load_sdk_script_content())
         builtin_config = builtin.get_sdk_config(include_admin_pin=True)
         remote_config = remote.get_sdk_config(include_admin_pin=True)
         for section in ('sdk', 'info', 'operations'):
@@ -58,6 +60,9 @@ class SDKCompatibilityTests(SimpleTestCase):
         expected_login = deepcopy(builtin_config['login'])
         sign = next(step for step in expected_login['steps'] if step['name'] == 'signChallenge')
         sign['call'] = 'UKey_P7SignAttach'
+        sign['digest_certificate'] = '{{ ukey.cert }}'
+        index = expected_login['steps'].index(sign)
+        expected_login['steps'][index:index] = deepcopy(expected_login['detect']['steps'])
         submit = next(step for step in expected_login['steps'] if step.get('type') == 'submit')
         submit['fields']['challenge_id'] = '{{ challenge.id }}'
         self.assertEqual(expected_login, remote_config['login'])
@@ -82,14 +87,16 @@ class SDKCompatibilityTests(SimpleTestCase):
         self.assertNotIn('pin', config.get_sdk_config()['config'])
         self.assertEqual(config.get_sdk_config(include_admin_pin=True)['config']['pin']['default'], '123456')
 
-    def test_rsa_ca_key_sizes_select_sha256_without_changing_displayed_algorithm(self):
-        for algorithm in ('RSA-1024', 'RSA-2048', 'RSA-3072', 'RSA-4096', 'SM2'):
+    def test_ca_algorithm_never_selects_login_signing_digest(self):
+        for algorithm in ('RSA', 'SM2', 'RSA / SM2', ''):
             with self.subTest(algorithm=algorithm), patch(
-                'authentication.backends.ukey.providers.vctk_s.detect_cert_algorithm', return_value=algorithm,
+                'authentication.backends.ukey.providers.vctk_s.VCTKSCAProvider.ca_algorithm',
+                new=property(lambda self: algorithm),
             ):
-                config = UKeySDKConfig(snapshot()).get_sdk_config()['config']
-                self.assertEqual(config['asym_alg_name'], algorithm)
-                self.assertEqual(config['digestAlg'], 1 if algorithm == 'SM2' else 4)
+                config = UKeySDKConfig(snapshot()).get_sdk_config()
+                sign = next(step for step in config['login']['steps'] if step['name'] == 'signChallenge')
+                self.assertEqual(config['config']['asym_alg_name'], algorithm)
+                self.assertEqual(sign['digest_certificate'], '{{ ukey.cert }}')
 
     def test_certificate_selection_and_identity_remain_user_sn(self):
         provider = get_provider(snapshot())
@@ -111,6 +118,13 @@ class SDKCompatibilityTests(SimpleTestCase):
 
 
 class SettingsTests(SimpleTestCase):
+    def test_ca_parse_error_is_reported_on_the_ca_upload_field(self):
+        serializer = UKeySettingSerializer(data={
+            'AUTH_UKEY_VCTK_S_ISSUING_CA': 'not a certificate',
+        }, context={'snapshot': snapshot()}, partial=True)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('AUTH_UKEY_VCTK_S_ISSUING_CA', serializer.errors)
+
     def test_public_settings_expose_status_but_not_uploaded_certificates(self):
         result = UKeySettingSerializer(instance=snapshot()).data
         self.assertTrue(result['AUTH_UKEY_VCTK_S_ISSUING_CA_CONFIGURED'])

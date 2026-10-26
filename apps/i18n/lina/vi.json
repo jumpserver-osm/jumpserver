@@ -1873,7 +1873,7 @@
     "UKeyVCTKSServerURL": "URL dịch vụ xác minh VCTK_S",
     "UKeyVCTKSServerHelp": "Nhập địa chỉ HTTP/HTTPS đầy đủ của dịch vụ VCTK_S, không có đường dẫn, truy vấn hoặc đoạn.",
     "UKeyVCTKSIssuingCA": "CA cấp chứng chỉ đáng tin cậy",
-    "UKeyVCTKSIssuingCAHelp": "Tải lên một chứng chỉ CA PEM đã trực tiếp cấp chứng chỉ UKey. Nội dung chứng chỉ đã lưu không được hiển thị. Để trống để giữ chứng chỉ đã lưu.",
+    "UKeyVCTKSIssuingCAHelp": "Tải lên tệp PEM chứa tối đa 16 chứng chỉ CA tin cậy (tối đa 64 KB), bao gồm CA trực tiếp cấp chứng chỉ UKey. Thứ tự không quan trọng. CA hết hạn hoặc chưa có hiệu lực không được dùng để xác minh đăng nhập. Để trống để giữ tệp đã lưu.",
     "UKeyVCTKSIssuingCAConfigured": "Đã cấu hình CA cấp chứng chỉ",
     "UKeyVCTKSIssuingCANotConfigured": "Chưa cấu hình CA cấp chứng chỉ",
     "UKeyVCTKSConnectionPassed": "Kiểm tra tạo số ngẫu nhiên VCTK_S thành công. Chưa kiểm tra chữ ký và chứng chỉ UKey. Cấu hình chưa được lưu.",

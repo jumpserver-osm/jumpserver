@@ -1873,7 +1873,7 @@
     "UKeyVCTKSServerURL": "URL del servicio de verificación VCTK_S",
     "UKeyVCTKSServerHelp": "Introduzca la dirección HTTP/HTTPS completa del servicio VCTK_S, sin ruta, consulta ni fragmento.",
     "UKeyVCTKSIssuingCA": "CA emisora de confianza",
-    "UKeyVCTKSIssuingCAHelp": "Cargue un certificado CA PEM que haya emitido directamente el certificado UKey. No se muestra el contenido guardado. Deje la carga vacía para conservar el certificado guardado.",
+    "UKeyVCTKSIssuingCAHelp": "Cargue un archivo PEM con hasta 16 certificados CA de confianza (máximo 64 KB), incluida la CA que emitió directamente el certificado UKey. El orden no importa. Las CA caducadas o aún no válidas no se usan para iniciar sesión. Deje la carga vacía para conservar el archivo guardado.",
     "UKeyVCTKSIssuingCAConfigured": "CA emisora configurada",
     "UKeyVCTKSIssuingCANotConfigured": "CA emisora sin configurar",
     "UKeyVCTKSConnectionPassed": "La comprobación de generación de números aleatorios VCTK_S se completó. No se han probado la firma ni el certificado UKey. La configuración no se ha guardado.",

@@ -10,7 +10,9 @@ from ..clients.fisherman import (
     Certificate, MAX_CERT, SM2_OID, SVSError, decode_base64, strict_der,
 )
 from ..clients.vctk_s import MAX_P7_SIZE, VCTKSClient
-from ..exceptions import UKeyAuthError, UKeyServiceError
+from ..exceptions import (
+    UKeyAuthError, UKeyCertChainError, UKeyCertUnsupportedAlgorithmError, UKeyServiceError,
+)
 from .base import BaseVerifier
 from .builtin import BuiltinVerifier
 
@@ -20,6 +22,19 @@ SIGNED_DATA_OIDS = {'1.2.840.113549.1.7.2', '1.2.156.10197.6.1.4.2.2'}
 DATA_OIDS = {'1.2.840.113549.1.7.1', '1.2.156.10197.6.1.4.2.1'}
 SM3_OID = '1.2.156.10197.1.401'
 SHA256_OID = '2.16.840.1.101.3.4.2.1'
+MAX_CA_BUNDLE_SIZE = 65536
+MAX_CA_CERTIFICATES = 16
+CA_PEM_PATTERN = re.compile(
+    r'-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+?)-----END CERTIFICATE-----'
+)
+
+
+class VCTKSCAConfigError(UKeyAuthError):
+    """A certificate-field error, separate from HTTP service configuration."""
+
+
+class CertificatePolicyError(ValueError):
+    """A safe, localized reason that contains no certificate contents."""
 
 
 class VCTKSCertificateChoices(cms.CertificateChoices):
@@ -62,10 +77,16 @@ def certificate_algorithm(certificate):
             or (algorithm['algorithm'].native == 'ec'
                 and algorithm['parameters'].native == SM2_OID)):
         return 'sm2'
-    raise ValueError('Unsupported issuing CA or signing certificate algorithm')
+    raise CertificatePolicyError(_('Unsupported issuing CA or signing certificate algorithm'))
 
 
-def checked_certificate(data, *, ca=False):
+def check_certificate_validity(certificate):
+    validity = certificate['tbs_certificate']['validity']
+    if not validity['not_before'].native <= datetime.now(timezone.utc) <= validity['not_after'].native:
+        raise ValueError(_('Certificate has expired or is not yet valid'))
+
+
+def checked_certificate(data, *, ca=False, check_time=True):
     if not isinstance(data, bytes) or not 1 <= len(data) <= MAX_CERT:
         raise ValueError('Invalid certificate size')
     certificate = strict_der(Certificate, data)
@@ -73,24 +94,78 @@ def checked_certificate(data, *, ca=False):
     extensions = certificate['tbs_certificate']['extensions']
     extension_ids = [extension['extn_id'].dotted for extension in extensions]
     if len(extension_ids) != len(set(extension_ids)):
-        raise ValueError('Duplicate certificate extension')
+        raise CertificatePolicyError(_('Duplicate certificate extension'))
     if bool(certificate.ca) != ca:
-        raise ValueError('Incorrect certificate role')
+        raise CertificatePolicyError(_('Incorrect certificate role (CA or user certificate)'))
     usage = certificate.key_usage_value
     if usage is not None and ('key_cert_sign' if ca else 'digital_signature') not in usage.native:
-        raise ValueError('Incorrect certificate key usage')
-    validity = certificate['tbs_certificate']['validity']
-    if not validity['not_before'].native <= datetime.now(timezone.utc) <= validity['not_after'].native:
-        raise ValueError('Certificate outside validity period')
+        raise CertificatePolicyError(_('Incorrect certificate key usage'))
+    if check_time:
+        check_certificate_validity(certificate)
     return certificate
 
 
-def load_issuing_ca(value):
-    if (not isinstance(value, str) or len(value) > 32768
-            or not re.fullmatch(r'\s*-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\s]+'
-                                r'-----END CERTIFICATE-----\s*', value)):
-        raise ValueError('A single PEM issuing CA is required')
-    return checked_certificate(pem.unarmor(value.encode('ascii'))[2], ca=True)
+def load_issuing_cas(value):
+    """Load explicitly trusted issuers, without making idle CA expiry fatal."""
+    if (not isinstance(value, str) or not value.strip() or not value.isascii()
+            or len(value) > MAX_CA_BUNDLE_SIZE):
+        raise VCTKSCAConfigError(_('Upload a PEM CA certificate file of at most 64 KB.'))
+    certificates, seen, end = [], set(), 0
+    for index, match in enumerate(CA_PEM_PATTERN.finditer(value), 1):
+        if index > MAX_CA_CERTIFICATES:
+            raise VCTKSCAConfigError(_('Upload at most 16 CA certificates.'))
+        if value[end:match.start()].strip():
+            raise VCTKSCAConfigError(_('Invalid PEM content before CA certificate %(index)d.') % {'index': index})
+        try:
+            encoded = re.sub(r'\s+', '', match.group(1))
+            der = decode_base64(encoded, MAX_CERT)
+            certificate = checked_certificate(der, ca=True, check_time=False)
+        except Exception as exc:
+            # ASN.1 parser exceptions can contain certificate data.
+            reason = str(exc) if isinstance(exc, CertificatePolicyError) else str(
+                _('Invalid or unsupported CA certificate')
+            )
+            raise VCTKSCAConfigError(_('CA certificate %(index)d: %(reason)s.') % {
+                'index': index, 'reason': reason,
+            }) from None
+        if der not in seen:
+            seen.add(der)
+            certificates.append(certificate)
+        end = match.end()
+    if not certificates or value[end:].strip():
+        raise VCTKSCAConfigError(_('Invalid PEM CA certificate file or trailing content.'))
+    return certificates
+
+
+def valid_issuing_cas(certificates):
+    for certificate in certificates:
+        try:
+            check_certificate_validity(certificate)
+        except ValueError:
+            continue
+        yield certificate
+
+
+def verify_certificate_issuer(certificate, cert, issuers, username):
+    unsupported = False
+    for issuer in valid_issuing_cas(issuers):
+        if (certificate.issuer.dump() != issuer.subject.dump()
+                or (certificate.authority_key_identifier is not None and issuer.key_identifier is not None
+                    and certificate.authority_key_identifier != issuer.key_identifier)):
+            continue
+        # The existing SM2/RSA backends do not support cross-algorithm issuance.
+        if certificate_algorithm(certificate) != certificate_algorithm(issuer):
+            unsupported = True
+            continue
+        try:
+            issuer_pem = pem.armor('CERTIFICATE', issuer.dump()).decode('ascii')
+            return BuiltinVerifier(issuer_pem).verify_certificate(cert, username)
+        except UKeyCertChainError:
+            # Same-name issuers may use different keys. Identity errors must propagate.
+            continue
+    if unsupported:
+        raise UKeyCertUnsupportedAlgorithmError(_('Cross-algorithm CA issuance is not supported.'))
+    raise UKeyCertChainError(_('No valid trusted CA could verify the UKey certificate.'))
 
 
 def _signer_matches(sid, certificate):
@@ -148,11 +223,13 @@ class VCTKSVerifier(BaseVerifier):
     def validate_config(self):
         try:
             self._client()
-            load_issuing_ca(self.issuing_ca)
         except Exception:
             raise UKeyAuthError(_(
                 'Check the VCTK_S service URL, business authorization, HTTPS trust settings and issuing CA certificate.'
             )) from None
+        issuers = load_issuing_cas(self.issuing_ca)
+        if not any(valid_issuing_cas(issuers)):
+            raise VCTKSCAConfigError(_('At least one trusted CA certificate must currently be valid.'))
 
     def verify_proof(self, cert, signature, challenge, username=''):
         stage = 'parse'
@@ -161,15 +238,11 @@ class VCTKSVerifier(BaseVerifier):
                 raise ValueError('Invalid challenge')
             certificate = checked_certificate(decode_base64(cert, MAX_CERT))
             signature_bytes = decode_base64(signature, MAX_P7_SIZE)
-            issuer = load_issuing_ca(self.issuing_ca)
+            issuers = load_issuing_cas(self.issuing_ca)
             stage = 'signer_identity'
             digest = check_attached_signer(signature_bytes, certificate, challenge.encode('ascii'))
             stage = 'certificate_trust'
-            if (certificate.issuer.dump() != issuer.subject.dump()
-                    or (certificate.authority_key_identifier is not None and issuer.key_identifier is not None
-                        and certificate.authority_key_identifier != issuer.key_identifier)):
-                raise ValueError('Incorrect certificate issuer')
-            claims = BuiltinVerifier(self.issuing_ca).verify_certificate(cert, username)
+            claims = verify_certificate_issuer(certificate, cert, issuers, username)
         except UKeyAuthError:
             raise
         except Exception as exc:

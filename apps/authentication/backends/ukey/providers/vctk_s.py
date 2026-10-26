@@ -2,8 +2,9 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 
-from ..utils import detect_cert_algorithm
-from ..verifiers.vctk_s import VCTKSVerifier
+from ..verifiers.vctk_s import (
+    VCTKSCAConfigError, VCTKSVerifier, certificate_algorithm, load_issuing_cas,
+)
 from .base import BaseCAProvider
 
 
@@ -16,6 +17,7 @@ class VCTKSCAProvider(BaseCAProvider):
     supports_connection_test = True
     expose_default_pin = True
     sdk_sign_method = 'UKey_P7SignAttach'
+    sdk_digest_from_certificate = True
     settings_serializer = 'settings.serializers.auth.ukey.VCTKSCASettingSerializer'
     secret_fields = (
         'AUTH_UKEY_VCTK_S_TLS_CA_CERT', 'AUTH_UKEY_VCTK_S_ISSUING_CA',
@@ -30,12 +32,11 @@ class VCTKSCAProvider(BaseCAProvider):
 
     @property
     def ca_algorithm(self):
-        return detect_cert_algorithm(self.snapshot.get('AUTH_UKEY_VCTK_S_ISSUING_CA', '') or '')
-
-    @property
-    def sdk_digest_algorithm(self):
-        # RSA issuing CA key sizes need not match the UKey's key size.
-        return 4 if self.ca_algorithm.startswith('RSA-') else None
+        try:
+            issuers = load_issuing_cas(self.snapshot.get('AUTH_UKEY_VCTK_S_ISSUING_CA', ''))
+        except VCTKSCAConfigError:
+            return ''
+        return ' / '.join(sorted({certificate_algorithm(issuer).upper() for issuer in issuers}))
 
     @property
     def verifier(self):
@@ -60,7 +61,10 @@ class VCTKSCAProvider(BaseCAProvider):
                 and self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_VERIFY', 'system') == 'custom'
                 and not self.snapshot.get('AUTH_UKEY_VCTK_S_TLS_CA_CERT')):
             raise ValidationError({'AUTH_UKEY_VCTK_S_TLS_CA_CERT': _('A CA certificate is required.')})
-        self.verifier.validate_config()
+        try:
+            self.verifier.validate_config()
+        except VCTKSCAConfigError as exc:
+            raise ValidationError({'AUTH_UKEY_VCTK_S_ISSUING_CA': str(exc)}) from None
 
     def test_connection(self):
         return self.verifier.test_connection()

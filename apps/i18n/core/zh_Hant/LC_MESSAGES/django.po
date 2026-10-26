@@ -13213,8 +13213,8 @@ msgstr "用於 HTTPS 服務的 PEM 信任憑證，與 UKey 簽發 CA 獨立。�
 msgid "VCTK_S trusted issuing CA"
 msgstr "VCTK_S 可信簽發 CA"
 
-msgid "Upload one PEM CA certificate that directly issued the UKey certificate. Leave blank to keep the saved certificate."
-msgstr "上傳直接簽發 UKey 憑證的單個 PEM CA 憑證。留空保留已儲存憑證。"
+msgid "Upload a PEM file containing up to 16 trusted CA certificates (maximum 64 KB). Include the CA that directly issued the UKey certificate; order does not matter. Expired or not-yet-valid CAs are not used for login. Leave blank to keep the saved file."
+msgstr "上傳包含最多 16 張可信 CA 憑證的 PEM 檔案（最大 64 KB），需包含直接簽發 UKey 使用者憑證的 CA，順序不限。過期或尚未生效的 CA 不用於登入驗證。留空保留已儲存檔案。"
 
 msgid "VCTK_S rejected the operation or returned an invalid response."
 msgstr "VCTK_S 拒絕操作或傳回無效回應。"
