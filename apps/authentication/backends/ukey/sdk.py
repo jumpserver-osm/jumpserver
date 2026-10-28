@@ -57,6 +57,9 @@ class UKeySDKConfig:
         if vendor == 'long_mai' and self.provider.binding_mode == 'certificate':
             with open(self._vendor_path('xjca_adapter.js'), 'rb') as adapter:
                 return cache[vendor] + b'\n' + adapter.read()
+        if self.provider.sdk_digest_from_certificate:
+            with open(self._vendor_path('vctks_certificate.js'), 'rb') as adapter:
+                return cache[vendor] + b'\n' + adapter.read()
         return cache[vendor]
 
     def load_sdk_config_content(self):
@@ -169,6 +172,21 @@ class UKeySDKConfig:
         provider = self.provider
         if provider.sdk_profile:
             self._apply_provider_config(sdk_config, provider.sdk_profile)
+        if provider.sdk_sign_method:
+            signing_steps = [step for step in sdk_config['login']['steps']
+                             if step.get('name') == 'signChallenge']
+            if len(signing_steps) != 1:
+                raise ValueError('UKey SDK must contain exactly one challenge signing step')
+            signing_steps[0]['call'] = provider.sdk_sign_method
+            if provider.sdk_digest_from_certificate:
+                signing_steps[0]['digest_certificate'] = '{{ ukey.cert }}'
+                # Re-read the signing certificate after PIN, immediately before signing.
+                index = sdk_config['login']['steps'].index(signing_steps[0])
+                sdk_config['login']['steps'][index:index] = deepcopy(sdk_config['login']['detect']['steps'])
+        if provider.uses_one_time_challenge:
+            for step in sdk_config['login']['steps']:
+                if step.get('type') == 'submit':
+                    step['fields']['challenge_id'] = '{{ challenge.id }}'
         trans_filter = self._build_trans_filter(sdk_config, lang)
         sdk_config = self._render(sdk_config, trans_filter)
         sdk_config = self._apply_internal_config_to_sdk_config(sdk_config)
@@ -228,9 +246,13 @@ class UKeySDKConfig:
             else:
                 resolved_config[k] = v
 
+        digest_algorithm = self.provider.sdk_digest_algorithm
+        if digest_algorithm is not None:
+            resolved_config['digestAlg'] = digest_algorithm
+
         # 追加后端专有字段（不在 YAML config 中配置）
         script_url = reverse('api-auth:ukey:ukey-sdk-script')
-        if self.provider.binding_mode == 'certificate':
+        if self.provider.uses_one_time_challenge:
             script_url += '?' + urlencode({
                 'vendor': self.snapshot['AUTH_UKEY_VENDOR'], 'revision': self.snapshot[REVISION],
             })
