@@ -1,0 +1,157 @@
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth import login, logout
+from django.core.exceptions import ValidationError
+from django.http.response import HttpResponseRedirect
+from django.urls import reverse
+from django.utils.module_loading import import_string
+from django.utils.translation import gettext_lazy as _
+from rest_framework import status
+from rest_framework.generics import RetrieveAPIView
+from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer, TemplateHTMLRenderer
+from rest_framework.response import Response
+
+from authentication.const import CUSTOM_SSO_FIRST_LOGIN_SESSION_KEY
+from common.utils import get_logger
+from rbac.models import SystemRole, SystemRoleBinding
+from users.validators import get_validation_error_message
+from ..mixins import AuthMixin
+
+__all__  = ['CustomSSOLoginAPIView']
+
+logger = get_logger(__file__)
+
+
+custom_sso_authenticate_method = None
+
+if settings.AUTH_CUSTOM_SSO:
+    ''' 保证自定义 SSO 认证方法在服务运行时不能被更改，只在第一次调用时加载一次 '''
+    try:
+        custom_auth_method_path = 'xpack.plugins.jdmc.custom_sso.authenticate'
+        custom_sso_authenticate_method = import_string(custom_auth_method_path)
+    except Exception as e:
+        logger.warning('Import custom SSO auth method failed: {}, Maybe not enabled'.format(e))
+
+
+class CustomSSOLoginAPIView(AuthMixin, RetrieveAPIView):
+
+    permission_classes = [AllowAny]
+    renderer_classes = [JSONRenderer, TemplateHTMLRenderer]
+
+    next_url = '/'
+
+    def get_error_response(self, message, status_code):
+        headers = {'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'}
+        if self.request.accepted_renderer.format != 'html':
+            return Response({'detail': message}, status=status_code, headers=headers)
+
+        context = {
+            'title': _('Single sign-on failed'),
+            'message': message,
+            'help_text': _(
+                'Return to the platform that opened this link and start sign-in again. '
+                'If the problem persists, contact the administrator.'
+            ),
+            'login_url': reverse('authentication:login') + '?admin=1',
+            'login_label': _('Back to login'),
+        }
+        return Response(
+            context, status=status_code, headers=headers,
+            template_name='authentication/custom_sso_error.html',
+        )
+
+    def is_enabled(self):
+        return settings.AUTH_CUSTOM_SSO and callable(custom_sso_authenticate_method)
+
+    def retrieve(self, request, *args, **kwargs):
+        if not self.is_enabled():
+            return self.get_error_response(
+                _('Single sign-on is currently unavailable. Please contact the administrator or use another sign-in method.'),
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        query_params = {}
+        for param in settings.AUTH_CUSTOM_SSO_QUERY_PARAMS:
+            value = self.request.query_params.get(param)
+            if not value:
+                return self.get_error_response(
+                    _('The single sign-on link is incomplete. Please start sign-in again from the original platform.'),
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            query_params[param] = value
+
+        user, error = self.authenticate(**query_params)
+        if user:
+            if user.is_first_login:
+                if not user.can_update_password():
+                    error = 'First login password change is unavailable for this user.'
+                    self.send_auth_signal(success=False, reason=error)
+                    return self.get_error_response(
+                        _('First login password change is unavailable for this user. Please contact the administrator.'),
+                        status.HTTP_403_FORBIDDEN,
+                    )
+
+                if request.user.is_authenticated:
+                    logout(request)
+                token = user.generate_reset_token()
+                request.session[CUSTOM_SSO_FIRST_LOGIN_SESSION_KEY] = {
+                    'user_id': str(user.id),
+                    'token': token,
+                    'next_url': self.next_url,
+                }
+                reset_url = reverse('authentication:reset-password')
+                return HttpResponseRedirect(f'{reset_url}?{urlencode({"token": token})}')
+
+            login(request, user, backend=settings.AUTH_BACKEND_CUSTOM_SSO)
+            self.send_auth_signal(success=True, user=user)
+            return HttpResponseRedirect(self.next_url)
+        else:
+            self.send_auth_signal(success=False, reason=error)
+            logger.warning('Custom SSO login failed: %s', error)
+            return self.get_error_response(
+                _('Unable to complete single sign-on. The login link may have expired or already been used.'),
+                status.HTTP_401_UNAUTHORIZED,
+            )
+
+    def authenticate(self, **query_params):
+        try:
+            userinfo, error = custom_sso_authenticate_method(**query_params)
+            if error:
+                return None, error
+            self.next_url = userinfo.get('next_url', '/')
+        except Exception as e:
+            error = f'Custom SSO authenticate error: {e}'
+            return None, error
+
+        try:
+            user = self.get_or_create_user_from_userinfo(userinfo)
+            return user, ''
+        except ValidationError as e:
+            return None, get_validation_error_message(e)
+        except Exception as e:
+            error = f'Custom SSO get or create user error: {e}'
+            return None, error
+
+    def get_or_create_user_from_userinfo(self, userinfo: dict):
+        User = get_user_model()
+        username = userinfo.get('username')
+        if username == 'admin':
+            user = User.objects.filter(username='admin').first()
+            return user
+
+        name = userinfo.get('name')
+        email = userinfo.get('email')
+        defaults = {'name': name, 'email': email}
+        user, created = get_user_model().objects.get_or_create(
+            username=username, defaults=defaults
+        )
+        if created:
+            system_role_name = userinfo.get('system_role_name')
+            system_role = SystemRole.objects.filter(name=system_role_name).first()
+            sys_role_binding = SystemRoleBinding(user=user, role=system_role)
+            sys_role_binding.save()
+
+        return user

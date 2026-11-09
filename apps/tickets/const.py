@@ -1,0 +1,69 @@
+from django.conf import settings
+from django.db.models import TextChoices, IntegerChoices
+from django.utils.translation import gettext_lazy as _
+
+TICKET_DETAIL_URL = '/ui/#/tickets/tickets/{id}?type={type}'
+
+
+class TicketType(TextChoices):
+    general = 'general', _("General")
+    apply_asset = 'apply_asset', _('Apply for asset')
+    login_confirm = 'login_confirm', _("Login confirm")
+    command_confirm = 'command_confirm', _('Command confirm')
+    login_asset_confirm = 'login_asset_confirm', _('Login asset confirm')
+
+
+class TicketState(TextChoices):
+    all = 'all', _('All')
+    pending = 'pending', _('Ticket open')
+    closed = 'closed', _("Ticket closed")
+    approved = 'approved', _('Ticket approved')
+    rejected = 'rejected', _('Ticket rejected')
+
+
+class TicketStatus(TextChoices):
+    open = 'open', _("Ticket open")
+    closed = 'closed', _("Ticket finished")
+
+
+class StepState(TextChoices):
+    pending = 'pending', _('Step pending')
+    closed = 'closed', _("Step closed")
+    approved = 'approved', _('Step approved')
+    rejected = 'rejected', _('Step rejected')
+
+
+class StepStatus(TextChoices):
+    active = 'active', _('Step active')
+    closed = 'closed', _("Step closed")
+    pending = 'pending', _('Step pending')
+
+
+class TicketAction(TextChoices):
+    open = 'open', _("Open")
+    close = 'close', _("Close")
+    reject = 'reject', _('Reject')
+    approve = 'approve', _('Approve')
+
+
+class TicketLevel(IntegerChoices):
+    one = 1, _("One level")
+    two = 2, _("Two level")
+
+
+class TicketApplyAssetScope(TextChoices):
+    all = 'all', _("All assets")
+    permed = 'permed', _("Permed assets")
+    permed_valid = 'permed_valid', _('Permed valid assets')
+
+    @classmethod
+    def get_scope(cls):
+        return settings.TICKET_APPLY_ASSET_SCOPE.lower()
+
+    @classmethod
+    def is_permed(cls):
+        return cls.get_scope() == cls.permed
+
+    @classmethod
+    def is_permed_valid(cls):
+        return cls.get_scope() == cls.permed_valid

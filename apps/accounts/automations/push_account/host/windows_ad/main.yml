@@ -1,0 +1,49 @@
+- hosts: demo
+  gather_facts: no
+  tasks:
+    - name: Test privileged account
+      ansible.windows.win_ping:
+
+    - name: Push user password
+      microsoft.ad.user:
+        name: "{{ account.username }}"
+        password: "{{ account.secret }}"
+        update_password: always
+        password_never_expires: yes
+        state: present
+        groups:
+          add: "{{ params.groups }}"
+      ignore_errors: true
+      when: account.secret_type == "password"
+
+    - name: Refresh connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Verify password (win_ping)
+      ansible.windows.win_ping:
+      vars:
+        ansible_user: "{{ account.username }}"
+        ansible_password: "{{ account.secret }}"
+      when: account.secret_type == "password" and check_conn_after_change
+      register: verify_winping
+      ignore_errors: true
+      ignore_unreachable: true
+
+    - name: Verify password (pyfreerdp)
+      rdp_ping:
+        login_host: "{{ jms_asset.origin_address }}"
+        login_port: "{{ jms_asset.protocols | selectattr('name', 'equalto', 'rdp') | map(attribute='port') | first | default(3389, true) }}"
+        login_user: "{{ account.username }}"
+        login_password: "{{ account.secret }}"
+        login_secret_type: "{{ account.secret_type }}"
+        gateway_args: "{{ jms_gateway | default({}) }}"
+      when:
+        - account.secret_type == "password"
+        - check_conn_after_change
+        - verify_winping is not defined
+          or (verify_winping.unreachable | default(false))
+          or (verify_winping.failed | default(false))
+      vars:
+        ansible_connection: local
+        ansible_shell_type: sh
+        ansible_python_interpreter: "{{ local_python_interpreter }}"

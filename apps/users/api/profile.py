@@ -1,0 +1,84 @@
+# ~*~ coding: utf-8 ~*~
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
+
+from authentication.models import ConnectionToken
+from authentication.permissions import IsValidUserOrConnectionToken
+from common.utils import get_object_or_none
+from orgs.utils import tmp_to_root_org
+from users.notifications import (
+    ResetPasswordMsg, ResetPasswordSuccessMsg, ResetSSHKeyMsg,
+)
+from .mixins import UserQuerysetMixin
+from .. import serializers
+from ..models import User
+
+__all__ = [
+    'UserResetPasswordApi', 'UserResetPKApi',
+    'UserProfileApi', 'UserPasswordApi',
+    'UserPermissionsApi'
+]
+
+
+class UserResetPasswordApi(UserQuerysetMixin, generics.UpdateAPIView):
+    queryset = User.objects.all()
+    serializer_class = serializers.UserSerializer
+
+    def perform_update(self, serializer):
+        user = self.get_object()
+        ResetPasswordMsg(user).publish_async()
+
+
+class UserResetPKApi(UserQuerysetMixin, generics.UpdateAPIView):
+    serializer_class = serializers.UserSerializer
+
+    def perform_update(self, serializer):
+        user = self.get_object()
+        user.public_key = None
+        user.save()
+        ResetSSHKeyMsg(user).publish_async()
+
+
+class UserProfileApi(generics.RetrieveUpdateAPIView):
+    permission_classes = (IsValidUserOrConnectionToken,)
+    serializer_class = serializers.UserProfileSerializer
+
+    def get_object(self):
+        if self.request.user.is_anonymous:
+            user = self.get_connection_token_user()
+            if user:
+                return user
+        return self.request.user
+
+    def get_connection_token_user(self):
+        token_id = self.request.query_params.get('token')
+        if not token_id:
+            return
+        with tmp_to_root_org():
+            token = get_object_or_none(ConnectionToken, id=token_id)
+        if not token:
+            return
+        return token.user
+
+
+class UserPasswordApi(generics.RetrieveUpdateAPIView):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = serializers.UserUpdatePasswordSerializer
+    # patch 方法不允许，否则 old_password 不传会导致用户直接修改密码成功，安全风险大
+    http_method_names = ['put', 'head', 'options']
+
+    def get_object(self):
+        return self.request.user
+
+    def update(self, request, *args, **kwargs):
+        resp = super().update(request, *args, **kwargs)
+        ResetPasswordSuccessMsg(self.request.user, request).publish_async()
+        return resp
+
+
+class UserPermissionsApi(generics.RetrieveAPIView):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = serializers.UserPermsSerializer
+
+    def get_object(self):
+        return self.request.user

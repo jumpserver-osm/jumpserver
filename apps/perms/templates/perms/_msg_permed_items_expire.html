@@ -1,0 +1,19 @@
+{% load i18n %}
+<p>
+    {% trans 'Dear' %} {{ name }},
+</p>
+
+<p>
+    {% blocktranslate %}The following {{ item_type }} will expire in {{ count }}{% endblocktranslate %}
+</p>
+
+<ul>
+    {% for item in items %}
+        <li>{{ item }}</li>
+    {% endfor %}
+</ul>
+
+<br>
+<p>
+    {% trans 'If you have any question, please contact the administrator' %}
+</p>

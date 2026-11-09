@@ -1,0 +1,127 @@
+from django.conf import settings
+from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
+
+from apps.settings.serializers.cleaning import MIN_VALUE
+from common.serializers.fields import EncryptedField
+from ..const import NAS_MOUNT_PATH
+
+__all__ = ['StorageSettingSerializer']
+
+
+class StorageSettingSerializer(serializers.Serializer):
+    PREFIX_TITLE = _('Storage')
+
+    FTP_FILE_MAX_STORE = serializers.IntegerField(
+        required=True,min_value=0,
+        label=_('File max store'),
+        help_text=_('File max store size (MB), <= 0 means no backup')
+    )
+    STORAGE_USAGE_THRESHOLD = serializers.IntegerField(
+        required=True,min_value=50, max_value=95,
+        label=_('Disk threshold'),
+        help_text=_('When disk space usage exceeds the set threshold percentage, the periodic reclamation task is triggered. Threshold range: 50-95')
+    )
+    STORAGE_RECLAMATION_METHOD = serializers.ChoiceField(
+        required=False, default='delete_day',
+        choices=(
+            ('delete_day', _('Delete the earliest day of audit')),
+            ('archive_day', _('Archive the earliest day of audit')),
+            ('delete_month', _('Delete the earliest month of audit')),
+            ('archive_month', _('Archive the earliest month of audit')),
+        ),
+        label=_('Storage reclamation method'),
+        help_text=_('Archive means move files to NAS storage and then delete local files')
+    )
+    STORAGE_RECLAMATION_TARGETS = serializers.ListField(
+        required=False, default=list,
+        child=serializers.ChoiceField(
+            choices=[
+                ('session_replay', _('Session replay')),
+                ('file_transfer', _('File transfer')),
+            ]
+        ),
+        label=_('Storage reclamation targets'),
+        help_text=_('Select which data to clean during storage reclamation')
+    )
+
+    # NAS storage
+    NAS_ENABLED = serializers.BooleanField(
+        required=False, default=False,
+        label=_('NAS enabled'),
+        help_text=_('Enable NAS storage')
+    )
+    NAS_TYPE = serializers.ChoiceField(
+        choices=(('nfs', 'NFS'), ('cifs', 'CIFS')),
+        required=False, allow_null=True, allow_blank=True,
+        label=_('NAS type'),
+        help_text=_('NAS storage type: windows or linux')
+    )
+    NAS_HOST = serializers.CharField(
+        required=True, allow_null=True, allow_blank=True, max_length=128,
+        label=_('NAS host'),
+        help_text=_('NAS server address, e.g. 192.168.1.100')
+    )
+    NAS_PORT = serializers.IntegerField(
+        required=True, allow_null=True, min_value=0, max_value=65535,
+        label=_('NAS port'),
+        help_text=_('NAS port')
+    )
+    NAS_SHARE_NAME = serializers.CharField(
+        required=True, allow_null=True, allow_blank=True, max_length=256,
+        label=_('NAS share name'),
+        help_text=_('NAS storage path')
+    )
+    NAS_USERNAME = serializers.CharField(
+        required=True, allow_null=True, allow_blank=True, max_length=256,
+        label=_('NAS username'),
+        help_text=_('NAS login username')
+    )
+    NAS_PASSWORD = EncryptedField(
+        required=False, allow_null=True, allow_blank=True, max_length=1024,
+        label=_('NAS password'),
+        help_text=_('NAS login password')
+    )
+
+    def validate(self, attrs):
+        method = attrs.get('STORAGE_RECLAMATION_METHOD', getattr(
+            settings, 'STORAGE_RECLAMATION_METHOD', 'delete_day'
+        ))
+        if method in ('archive_day', 'archive_month'):
+            nas_enabled = attrs.get('NAS_ENABLED', getattr(settings, 'NAS_ENABLED', False))
+            if not nas_enabled:
+                raise serializers.ValidationError(
+                    _('Archive reclamation requires NAS storage to be enabled')
+                )
+
+        nas_fields = {
+            'NAS_ENABLED', 'NAS_TYPE', 'NAS_HOST', 'NAS_PORT',
+            'NAS_SHARE_NAME', 'NAS_USERNAME', 'NAS_PASSWORD',
+        }
+        config = self._get_nas_config(attrs)
+        if config['nas_enabled'] and nas_fields.intersection(attrs):
+            from settings.tools.nas_mount import test_nas_connection
+            ok, message = test_nas_connection(config)
+            if not ok:
+                raise serializers.ValidationError(message)
+        return attrs
+
+    def _get_nas_config(self, data=None):
+        """Get NAS config from submitted data, falling back to current settings."""
+        data = data if data is not None else getattr(self, 'validated_data', {})
+        return {
+            'nas_enabled': data.get('NAS_ENABLED', getattr(settings, 'NAS_ENABLED', False)),
+            'nas_type': data.get('NAS_TYPE', getattr(settings, 'NAS_TYPE', 'nfs')),
+            'nas_host': data.get('NAS_HOST', getattr(settings, 'NAS_HOST', '')),
+            'nas_port': data.get('NAS_PORT', getattr(settings, 'NAS_PORT', 0)),
+            'nas_share_name': data.get('NAS_SHARE_NAME', getattr(settings, 'NAS_SHARE_NAME', '')),
+            'nas_mount_path': NAS_MOUNT_PATH,
+            'nas_username': data.get('NAS_USERNAME', getattr(settings, 'NAS_USERNAME', '')),
+            'nas_password': data.get('NAS_PASSWORD', getattr(settings, 'NAS_PASSWORD', '')),
+        }
+
+    def post_save(self):
+        """Ensure NAS is mounted after saving settings (force re-mount)."""
+        from settings.tools.nas_mount import ensure_nas_mounted
+        config = self._get_nas_config()
+        ensure_nas_mounted(config, force=True)

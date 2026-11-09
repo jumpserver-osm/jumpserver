@@ -1,0 +1,96 @@
+from django.apps import apps
+from django.utils import translation
+
+from django_filters import rest_framework as drf_filters
+from rest_framework import filters
+from rest_framework.compat import coreapi, coreschema
+from common.drf.filters import BaseFilterSet
+from common.sessions.cache import user_session_manager
+from orgs.utils import current_org
+from .models import (
+    UserLoginLog, UserSession, OperateLog, IntegrationApplicationLog,
+)
+
+__all__ = ['CurrentOrgMembersFilter']
+
+
+class CurrentOrgMembersFilter(filters.BaseFilterBackend):
+    def get_schema_fields(self, view):
+        return [
+            coreapi.Field(
+                name='user', location='query', required=False, type='string',
+                schema=coreschema.String(
+                    title='user',
+                    description='user'
+                )
+            )
+        ]
+
+    def _get_user_list(self):
+        users = current_org.get_members(exclude=('Auditor',))
+        return users
+
+    def filter_queryset(self, request, queryset, view):
+        user_id = request.GET.get('user')
+        if user_id:
+            queryset = queryset.filter(user=user_id)
+        else:
+            queryset = queryset.filter(user__in=self._get_user_list())
+        return queryset
+
+
+class UserLoginLogFilterSet(drf_filters.FilterSet):
+    ip__icontains = drf_filters.CharFilter(field_name='ip', lookup_expr='icontains')
+
+    class Meta:
+        model = UserLoginLog
+        fields = ['id', 'username', 'ip', 'city', 'type', 'status', 'mfa']
+
+
+class UserSessionFilterSet(BaseFilterSet):
+    is_active = drf_filters.BooleanFilter(method='filter_is_active')
+    ip__icontains = drf_filters.CharFilter(method='filter_ip_contains')
+
+    @staticmethod
+    def filter_ip_contains(queryset, name, value):
+        return queryset.filter(ip__icontains=value)
+
+    @staticmethod
+    def filter_is_active(queryset, name, is_active):
+        keys = user_session_manager.get_active_keys()
+        if is_active:
+            queryset = queryset.filter(key__in=keys)
+        else:
+            queryset = queryset.exclude(key__in=keys)
+        return queryset
+
+    class Meta:
+        model = UserSession
+        fields = ['id', 'ip', 'city', 'type']
+
+
+class ServiceAccessLogFilterSet(drf_filters.FilterSet):
+    remote_addr__icontains = drf_filters.CharFilter(field_name='remote_addr', lookup_expr='icontains')
+
+    class Meta:
+        model = IntegrationApplicationLog
+        fields = ['account', 'remote_addr', 'service_id']
+
+
+class OperateLogFilterSet(BaseFilterSet):
+    resource_type = drf_filters.CharFilter(method='filter_resource_type')
+
+    @staticmethod
+    def filter_resource_type(queryset, name, resource_type):
+        current_lang = translation.get_language()
+        with translation.override(current_lang):
+            mapper = {str(m._meta.verbose_name): m._meta.verbose_name_raw for m in apps.get_models()}
+        tp = mapper.get(resource_type)
+        queryset = queryset.filter(resource_type__in=[tp, resource_type])
+        return queryset
+
+    class Meta:
+        model = OperateLog
+        fields = [
+            'user', 'action', 'resource', 'remote_addr'
+        ]
