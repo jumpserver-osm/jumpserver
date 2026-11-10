@@ -1,6 +1,10 @@
 """VCTK_S binding preserves other providers and requires PINs only for signing."""
+import json
 from pathlib import Path
+import shutil
+import subprocess
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
@@ -46,7 +50,7 @@ class SDKCompatibilityTests(SimpleTestCase):
         self.reverse.start()
         self.addCleanup(self.reverse.stop)
 
-    def test_reuses_original_jida_script_detection_and_submit_without_pin_management(self):
+    def test_reuses_original_jida_script_and_submit_without_pin_management(self):
         builtin = UKeySDKConfig(snapshot(AUTH_UKEY_CA_PROVIDER='builtin'))
         remote = UKeySDKConfig(snapshot())
         self.assertTrue(remote.load_sdk_script_content().startswith(builtin.load_sdk_script_content()))
@@ -54,7 +58,13 @@ class SDKCompatibilityTests(SimpleTestCase):
         self.assertNotIn(b'VCTKSCertificateDigest', builtin.load_sdk_script_content())
         builtin_config = builtin.get_sdk_config(include_admin_pin=True)
         remote_config = remote.get_sdk_config(include_admin_pin=True)
-        self.assertEqual(builtin_config['sdk'], remote_config['sdk'])
+        self.assertEqual(builtin_config['sdk']['create'], remote_config['sdk']['create'])
+        builtin_setup = builtin_config['sdk']['setup']['steps']
+        remote_setup = remote_config['sdk']['setup']['steps']
+        self.assertEqual([step['call'] for step in builtin_setup], [step['call'] for step in remote_setup])
+        for builtin_step, remote_step in zip(builtin_setup, remote_setup):
+            self.assertEqual(builtin_step, {key: value for key, value in remote_step.items() if key != 'check'})
+        self.assertNotIn('check', builtin_setup[1])
         operations = {item['key']: item for item in remote_config['operations']['items']}
         builtin_operations = {item['key']: item for item in builtin_config['operations']['items']}
         self.assertEqual(set(operations), {'bindUserUKeySN', 'unbindUserUKeySN'})
@@ -77,6 +87,74 @@ class SDKCompatibilityTests(SimpleTestCase):
         self.assertFalse(builtin_config['config']['capabilities']['uses_one_time_challenge'])
         self.assertNotIn('saved-password', repr(remote_config))
         self.assertNotIn('business-user', repr(remote_config))
+
+    def test_vctks_login_detection_checks_only_the_device_without_reading_certificates(self):
+        config = UKeySDKConfig(snapshot()).get_sdk_config()
+        detect = config['login']['detect']
+        self.assertTrue(detect['setup'])
+        self.assertEqual(detect['steps'], [])
+        self.assertEqual([step['call'] for step in config['sdk']['setup']['steps']], [
+            'UKey_CheckInstall', 'UKey_GetDevSN', 'UKey_GetVersion',
+        ])
+        serial = next(step for step in config['sdk']['setup']['steps'] if step['name'] == 'getDevSN')
+        self.assertEqual(serial['register'], 'ukey.devSN')
+        self.assertIn("typeof result === 'string'", serial['check']['expr'])
+        self.assertIn('result.length > 0', serial['check']['expr'])
+        self.assertNotEqual(serial.get('on_error'), 'skip')
+
+    def test_vctks_login_reads_exactly_one_fresh_certificate_after_pin_before_signing(self):
+        config = UKeySDKConfig(snapshot()).get_sdk_config()
+        steps = config['login']['steps']
+        self.assertEqual([step.get('call', step.get('type')) for step in steps], [
+            'UKey_VerifyPIN', 'UKey_GetCert', 'UKey_P7SignAttach', 'submit',
+        ])
+        self.assertEqual(steps[0]['check']['expr'], '{{ result === 0 }}')
+        self.assertEqual(steps[1]['args'], ['{{ config.certType }}'])
+        self.assertEqual(steps[1]['register'], 'ukey.cert')
+        self.assertEqual(steps[1]['check']['expr'], "{{ result != null && result !== '' }}")
+        self.assertNotEqual(steps[1].get('on_error'), 'skip')
+        self.assertEqual(steps[2]['digest_certificate'], '{{ ukey.cert }}')
+        self.assertEqual(steps[2]['args'][1], '{{ challenge.code_base64 }}')
+        self.assertEqual(steps[-1]['fields'], {
+            'signature': '{{ vars.signature }}', 'cert': '{{ ukey.cert }}', 'username': '',
+            'ukey_sn': '{{ ukey.devSN }}', 'challenge_id': '{{ challenge.id }}',
+        })
+        bind = next(item for item in config['operations']['items'] if item['key'] == 'bindUserUKeySN')
+        self.assertEqual(steps[1], next(step for step in bind['steps'] if step.get('call') == 'UKey_GetCert'))
+
+    def test_other_providers_keep_their_original_login_detection_and_steps(self):
+        for vendor, provider in (
+            ('ji_da', 'builtin'), ('long_mai', 'builtin'), ('long_mai', 'xjca'),
+        ):
+            with self.subTest(vendor=vendor, provider=provider):
+                sdk = UKeySDKConfig(snapshot(AUTH_UKEY_VENDOR=vendor, AUTH_UKEY_CA_PROVIDER=provider))
+                original = sdk._load_yaml(sdk.get_sdk_config_path())
+                if provider == 'xjca':
+                    override = sdk._load_yaml(sdk._vendor_path(sdk.provider.sdk_profile))
+                    override['i18n'] = {**original['i18n'], **override['i18n']}
+                    original = override
+                expected = sdk._render(original, sdk._build_trans_filter(original, 'en'))
+                config = sdk.get_sdk_config()
+                self.assertEqual(config['login'], expected['login'])
+
+    @skipUnless(shutil.which('node'), 'Requires Node.js to exercise the login page script')
+    def test_actual_login_page_polls_without_reading_certificates_and_reads_only_after_pin(self):
+        result = subprocess.run(
+            [shutil.which('node'), str(Path(__file__).with_name('vctks_login_polling.cjs'))],
+            input=json.dumps(UKeySDKConfig(snapshot()).get_sdk_config()),
+            text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_repeated_config_generation_does_not_duplicate_certificate_reads_or_mutate_profiles(self):
+        sdk = UKeySDKConfig(snapshot())
+        original = sdk._load_yaml(sdk.get_sdk_config_path())
+        for _ in range(3):
+            config = sdk.get_sdk_config()
+            self.assertEqual(config['login']['detect']['steps'], [])
+            self.assertEqual(sum(step.get('call') == 'UKey_GetCert'
+                                 for step in config['login']['steps']), 1)
+            self.assertEqual(sdk.load_sdk_config_content(), original)
 
     def test_provider_override_does_not_mutate_cached_builtin_config(self):
         remote = UKeySDKConfig(snapshot())

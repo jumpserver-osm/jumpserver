@@ -2,7 +2,15 @@
 sdk:
   create: {}
   setup:
-    steps: []
+    steps:
+      - name: getDevSN
+        label: "{{ '获取设备序列号' | trans }}"
+        call: UKey_GetDevSN
+        args: []
+        register: ukey.devSN
+        check:
+          expr: "{{ typeof result === 'string' && result.length > 0 && result.length <= 128 && result.trim() === result }}"
+          message: "{{ 'Failed to read the UKey device serial number. Reconnect the UKey and retry.' | trans }}"
 
 info:
   when: "{{ mode === 'admin' || (mode === 'user' && ukey.binding.bound && ukey.devSN === ukey.binding.hardware_serial) }}"
@@ -12,17 +20,9 @@ info:
 
 login:
   detect:
+    # Background detection must not open the native certificate chooser.
     setup: true
-    steps:
-      - &read_certificate
-        name: getCert
-        label: "{{ '获取证书' | trans }}"
-        call: UKey_GetCert
-        args: ["{{ config.certType }}"]
-        register: ukey.cert
-        check:
-          expr: "{{ result != null && result !== '' }}"
-          message: "{{ '未检测到证书' | trans }}"
+    steps: []
   steps:
     - &verify_pin
       name: verifyPin
@@ -32,7 +32,16 @@ login:
       check:
         expr: "{{ result === 0 }}"
         message: "{{ 'PIN 验证失败，错误码: {{ result }}' | trans }}"
-    # SDK config generation inserts a fresh certificate read after PIN.
+    # Read the current signing certificate only after successful PIN verification.
+    - &read_certificate
+      name: getCert
+      label: "{{ '获取证书' | trans }}"
+      call: UKey_GetCert
+      args: ["{{ config.certType }}"]
+      register: ukey.cert
+      check:
+        expr: "{{ result != null && result !== '' }}"
+        message: "{{ '未检测到证书' | trans }}"
     - &sign_challenge
       name: signChallenge
       label: "{{ '签名挑战码' | trans }}"
