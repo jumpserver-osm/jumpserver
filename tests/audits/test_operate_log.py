@@ -1,10 +1,15 @@
 import copy
+import json
 import unittest
 import uuid
 import warnings
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from support import DBStore, ESStore, RelationMixin, cache, handler, signals, utils
+from support import (
+    DBStore, ESStore, RelationMixin, cache, handler, signals, utils,
+    handler_ns, syslog_ns, other_ns, operate_serializer, request,
+)
 from datetime import datetime
 from django.apps import apps
 from django.core.cache import CacheKeyWarning
@@ -148,6 +153,189 @@ class AuditRegressionTests(unittest.TestCase):
             using='default',
         )
         self.assert_no_log_errors()
+
+    def capture_membership_syslog(self):
+        modules = {
+            'audits.models': SimpleNamespace(OperateLog=OperateLog),
+            'audits.serializers': SimpleNamespace(OperateLogSerializer=operate_serializer),
+            'common.utils.timezone': SimpleNamespace(local_now=lambda: datetime(2026, 11, 10, 12)),
+        }
+        self.enterContext(patch.dict('sys.modules', modules))
+        self.enterContext(patch.dict(handler_ns, {
+            'write_group_membership_syslog': syslog_ns['write_group_membership_syslog'],
+        }))
+        self.enterContext(patch.dict(syslog_ns, {'logger': Mock()}))
+        self.enterContext(patch.dict(other_ns, {'sys_logger': Mock()}))
+        post_save.connect(other_ns['on_audits_log_create'], sender=OperateLog, weak=False)
+        self.addCleanup(post_save.disconnect, other_ns['on_audits_log_create'], sender=OperateLog)
+        return syslog_ns['logger'], other_ns['sys_logger']
+
+    def membership_messages(self, logger):
+        return [json.loads(call.args[1]) for call in logger.info.call_args_list]
+
+    def test_membership_syslog_replacement_keeps_one_page_log(self):
+        instance, members = self.prepare(User, 'groups', ['A'], ['B'])
+        detailed, ordinary = self.capture_membership_syslog()
+        self.edit(instance, groups=[members['B'].pk])
+        self.assert_log('User group', ['A'], ['B'], 'User')
+        messages = self.membership_messages(detailed)
+        self.assertEqual([m['action']['value'] for m in messages], ['delete', 'create'])
+        self.assertEqual([m['user_group_id'] for m in messages],
+                         [str(members['A'].pk), str(members['B'].pk)])
+        self.assertEqual(len({m['id'] for m in messages}), 2)
+        for m in messages:
+            self.assertEqual(m['user_id'], str(instance.pk))
+            self.assertEqual(m['resource_type'], 'User')
+            self.assertEqual(m['remote_addr'], '127.0.0.1')
+            self.assertEqual(m['org_id'], 'org-1')
+            self.assertEqual(m['user'], str(request.user))
+            self.assertIn(str(instance), m['resource'])
+        ordinary.info.assert_not_called()
+        self.assertFalse(syslog_ns['relation_syslog'].get())
+
+    def test_membership_syslog_reverse_batch_clear_and_unchanged(self):
+        group, users = self.prepare(Group, 'users', [], ['U1', 'U2'])
+        detailed, ordinary = self.capture_membership_syslog()
+        self.edit(group, users=[u.pk for u in users.values()])
+        self.assert_log('User', [], ['U1', 'U2'], 'User group')
+        messages = self.membership_messages(detailed)
+        self.assertEqual({m['user_id'] for m in messages}, {str(u.pk) for u in users.values()})
+        self.assertTrue(all(m['user_group_id'] == str(group.pk) and
+                            m['action']['value'] == 'create' for m in messages))
+        detailed.reset_mock()
+        self.edit(group, users=[u.pk for u in users.values()])
+        detailed.info.assert_not_called()
+        group.users.clear()
+        self.assertEqual([m['action']['value'] for m in self.membership_messages(detailed)],
+                         ['delete', 'delete'])
+        self.assertEqual(group.users.count(), 0)
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_relation_api_and_add_all_no_duplicates(self):
+        group, users = self.prepare(Group, 'users', [], ['U1', 'U2'])
+        detailed, ordinary = self.capture_membership_syslog()
+        api = self.relation_api(User, 'groups')
+        relations = self.create_relations(api, [(users['U1'], group)], many=False)
+        api.perform_destroy(relations[0])
+        self.assertEqual([m['action']['value'] for m in self.membership_messages(detailed)],
+                         ['create', 'delete'])
+        detailed.reset_mock()
+        group.users.add(*users.values())
+        self.assertEqual(detailed.info.call_count, 2)
+        group.users.add(*users.values())
+        self.assertEqual(detailed.info.call_count, 2)
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_preserves_scalar_and_unrelated_logs(self):
+        instance, members = self.prepare(User, 'groups', ['A'], ['B'])
+        detailed, ordinary = self.capture_membership_syslog()
+        self.edit(instance, name='renamed', groups=[members['B'].pk])
+        self.assertEqual(detailed.info.call_count, 2)
+        ordinary.info.assert_called_once()
+        self.assertEqual(DBStore.convert_diff_to_before_after(OperateLog.objects.get().diff),
+                         ({'Name': 'resource', 'User group': 'A'},
+                          {'Name': 'renamed', 'User group': 'B'}))
+        detailed.reset_mock()
+        ordinary.reset_mock()
+        instance, members = self.prepare(AssetPermission, 'users', [], ['U'])
+        self.edit(instance, users=[members['U'].pk])
+        detailed.info.assert_not_called()
+        ordinary.info.assert_called_once()
+
+    def test_membership_syslog_relation_api_batch_and_user_clear(self):
+        instance, groups = self.prepare(User, 'groups', [], ['A', 'B'])
+        detailed, ordinary = self.capture_membership_syslog()
+        api = self.relation_api(User, 'groups')
+        self.create_relations(api, [(instance, group) for group in groups.values()])
+        self.assertEqual({m['user_group_id'] for m in self.membership_messages(detailed)},
+                         {str(group.pk) for group in groups.values()})
+        self.assertEqual(detailed.info.call_count, 2)
+        detailed.reset_mock()
+        instance.groups.clear()
+        self.assertEqual([m['action']['value'] for m in self.membership_messages(detailed)],
+                         ['delete', 'delete'])
+        self.assertEqual(instance.groups.count(), 0)
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_reverse_replacement(self):
+        group, users = self.prepare(Group, 'users', ['U1'], ['U2'])
+        detailed, ordinary = self.capture_membership_syslog()
+        self.edit(group, users=[users['U2'].pk])
+        self.assert_log('User', ['U1'], ['U2'], 'User group')
+        messages = self.membership_messages(detailed)
+        self.assertEqual([(m['action']['value'], m['user_id']) for m in messages],
+                         [('delete', str(users['U1'].pk)), ('create', str(users['U2'].pk))])
+        self.assertTrue(all(m['resource_type'] == 'User group' for m in messages))
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_same_named_replacement_uses_ids(self):
+        instance, members = self.prepare(User, 'groups', ['same'], [])
+        self.enabled = False
+        duplicate = Group.objects.create(name='same')
+        self.reset_logs()
+        self.enabled = True
+        detailed, ordinary = self.capture_membership_syslog()
+        self.edit(instance, groups=[duplicate.pk])
+        messages = self.membership_messages(detailed)
+        self.assertEqual([(m['action']['value'], m['user_group_id']) for m in messages],
+                         [('delete', str(members['same'].pk)), ('create', str(duplicate.pk))])
+        self.assertEqual(list(instance.groups.values_list('pk', flat=True)), [duplicate.pk])
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_failure_restores_normal_output(self):
+        instance, members = self.prepare(User, 'groups', [], ['A'])
+        detailed, ordinary = self.capture_membership_syslog()
+        self.enterContext(patch.object(detailed, 'info', side_effect=OSError('syslog unavailable')))
+        self.edit(instance, groups=[members['A'].pk])
+        self.assertEqual(instance.groups.count(), 1)
+        self.assertEqual(OperateLog.objects.count(), 1)
+        handler_ns['logger'].exception.assert_called_once()
+        self.assertFalse(syslog_ns['relation_syslog'].get())
+        self.edit(instance, name='new')
+        ordinary.info.assert_called_once()
+
+    def test_membership_syslog_not_sent_after_storage_failure_or_without_actor(self):
+        instance, members = self.prepare(User, 'groups', [], ['A'])
+        detailed, ordinary = self.capture_membership_syslog()
+        handler.log_client = Mock(ping=Mock(return_value=True), save=Mock(side_effect=ValueError('store failed')))
+        instance.groups.add(members['A'])
+        detailed.info.assert_not_called()
+        self.assertFalse(syslog_ns['relation_syslog'].get())
+        handler_ns['logger'].error.assert_called_once()
+        self.enterContext(patch.object(request.user, 'is_authenticated', False))
+        instance.groups.clear()
+        detailed.info.assert_not_called()
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_works_without_database_post_save(self):
+        instance, members = self.prepare(User, 'groups', [], ['A'])
+        detailed, ordinary = self.capture_membership_syslog()
+        store = object.__new__(ESStore)
+        store.es = Mock()
+        store.index, store.doc_type = 'test', '_doc'
+        store.get = Mock(return_value=None)
+        store.ping = lambda timeout=None: True
+        handler.log_client = store
+        self.edit(instance, groups=[members['A'].pk])
+        store.es.index.assert_called_once()
+        self.assertEqual(store.es.index.call_args.kwargs['body']['after'], {'User group': 'A'})
+        self.assertEqual(len(self.membership_messages(detailed)), 1)
+        self.assertEqual(OperateLog.objects.count(), 0)
+        ordinary.info.assert_not_called()
+
+    def test_membership_syslog_preserves_other_audit_categories_and_context(self):
+        _, ordinary = self.capture_membership_syslog()
+        login = Mock(data={'username': 'actor', 'status': 'success'})
+        self.enterContext(patch.dict(other_ns, {'UserLoginLogSerializer': Mock(return_value=login)}))
+        with syslog_ns['replacing_relation_syslog'](True):
+            other_ns['on_audits_log_create'](other_ns['UserLoginLog'], instance=object())
+            with syslog_ns['replacing_relation_syslog'](False):
+                self.assertFalse(syslog_ns['relation_syslog'].get())
+            self.assertTrue(syslog_ns['relation_syslog'].get())
+        self.assertFalse(syslog_ns['relation_syslog'].get())
+        ordinary.info.assert_called_once_with(
+            'login_log - ' + json.dumps({'username': 'actor', 'status': 'success'}),
+        )
 
     def test_relation_api_add_and_remove_single_and_bulk(self):
         for model, field, label in self.relation_api_paths:

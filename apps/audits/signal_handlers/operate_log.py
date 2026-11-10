@@ -34,6 +34,19 @@ def _get_m2m_audit_field(sender, instance, reverse):
     return None, None
 
 
+def _group_membership_relations(instance, reverse, before, after):
+    relations = []
+    for old, new, action in ((before, after, ActionChoices.delete),
+                             (after, before, ActionChoices.create)):
+        for pk in sorted(old.keys() - new.keys(), key=str):
+            user, group = (old[pk], instance) if reverse else (instance, old[pk])
+            relations.append({
+                'action': action, 'user': str(user), 'user_id': user.pk,
+                'group': str(group), 'group_id': group.pk, 'org_id': str(group.org_id),
+            })
+    return relations
+
+
 @receiver(m2m_changed)
 def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
     if instance is None or action not in (
@@ -48,13 +61,19 @@ def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
         key = (sender, reverse, kwargs.get('using'))
         snapshots = getattr(instance, '_operate_log_m2m_snapshots', {})
         manager = getattr(instance, accessor)
+        is_membership = sender is apps.get_model('users', 'User').groups.through
         if action in (PRE_ADD, PRE_REMOVE, PRE_CLEAR):
             # clear() supplies no pk_set after deletion, so capture the actual relation first.
-            snapshots[key] = sorted(str(obj) for obj in manager.using(kwargs.get('using')).all())
+            objects = list(manager.using(kwargs.get('using')).all())
+            values = sorted(str(obj) for obj in objects)
+            snapshots[key] = (values, {obj.pk: obj for obj in objects}) if is_membership else values
             instance._operate_log_m2m_snapshots = snapshots
             return
 
         before_value = snapshots.pop(key, None)
+        before_members = None
+        if is_membership and before_value is not None:
+            before_value, before_members = before_value
         if not snapshots and hasattr(instance, '_operate_log_m2m_snapshots'):
             del instance._operate_log_m2m_snapshots
         if before_value is None and (action not in (POST_ADD, POST_REMOVE) or not pk_set):
@@ -72,7 +91,17 @@ def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
                 for obj in removed:
                     before_objects.setdefault(obj.pk, str(obj))
                 before_value = sorted(before_objects.values())
-        if before_value == after_value:
+                if is_membership:
+                    before_members = {obj.pk: obj for obj in current_objects}
+                    before_members.update({obj.pk: obj for obj in removed})
+            if is_membership and action == POST_ADD:
+                before_members = {obj.pk: obj for obj in current_objects if obj.pk not in changed_ids}
+        syslog_kwargs = {}
+        if is_membership:
+            syslog_kwargs['syslog_relations'] = _group_membership_relations(
+                instance, reverse, before_members, {obj.pk: obj for obj in current_objects},
+            )
+        if before_value == after_value and not syslog_kwargs.get('syslog_relations'):
             return
 
         current_instance = model_to_dict(instance, include_model_fields=False)
@@ -82,7 +111,7 @@ def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
 
         create_or_update_operate_log(
             ActionChoices.update, instance._meta.verbose_name,
-            resource=instance, log_id=log_id, before=before, after=after
+            resource=instance, log_id=log_id, before=before, after=after, **syslog_kwargs
         )
 
 

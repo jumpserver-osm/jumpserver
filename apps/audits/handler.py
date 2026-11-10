@@ -17,6 +17,7 @@ from settings.serializers import SettingsSerializer
 from users.models import Preference
 from users.serializers import PreferenceSerializer
 from .backends import get_operate_log_storage
+from .syslog import replacing_relation_syslog, write_group_membership_syslog
 
 logger = get_logger(__name__)
 
@@ -163,7 +164,7 @@ class OperatorLogHandler(metaclass=Singleton):
     def create_or_update_operate_log(
             self, action, resource_type, resource=None, resource_display=None,
             force=False, log_id=None, before=None, after=None,
-            object_name=None
+            object_name=None, syslog_relations=None
     ):
         user = current_request.user if current_request else None
         if not user or not user.is_authenticated:
@@ -175,6 +176,11 @@ class OperatorLogHandler(metaclass=Singleton):
         resource_id = getattr(resource, 'pk', '')
         before, after = self.data_processing(before, after)
         if not force and (before == after):
+            if syslog_relations:
+                self.write_membership_syslog({
+                    'user': str(user), 'remote_addr': remote_addr,
+                    'resource_type': str(resource_type),
+                }, syslog_relations)
             # 前后都没变化，没必要生成日志，除非手动强制保存
             return
 
@@ -193,11 +199,22 @@ class OperatorLogHandler(metaclass=Singleton):
                 client = get_operate_log_storage(default=True)
 
             try:
-                client.save(**data)
+                with replacing_relation_syslog(syslog_relations is not None):
+                    client.save(**data)
             except Exception as e:
                 error_msg = 'An error occurred saving OperateLog.' \
                             'Error: %s, Data: %s' % (e, data)
                 logger.error(error_msg)
+            else:
+                if syslog_relations:
+                    self.write_membership_syslog(data, syslog_relations)
+
+    @staticmethod
+    def write_membership_syslog(data, relations):
+        try:
+            write_group_membership_syslog(data, relations)
+        except Exception:
+            logger.exception('An error occurred sending user group membership syslog.')
 
 
 op_handler = OperatorLogHandler()

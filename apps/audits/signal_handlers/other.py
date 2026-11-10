@@ -17,6 +17,7 @@ from users.models import User
 from users.signals import post_user_change_password
 from terminal.models import Session, Command
 from terminal.serializers import SessionSerializer, SessionCommandSerializer
+from audits.syslog import relation_syslog
 
 
 sys_logger = get_syslogger(__name__)
@@ -48,6 +49,8 @@ def on_audits_log_create(sender, instance=None, **kwargs):
         category = "ftp_log"
         serializer_cls = FTPLogSerializer
     elif sender == OperateLog:
+        if relation_syslog.get():
+            return
         category = "operation_log"
         serializer_cls = OperateLogSerializer
     elif sender == PasswordChangeLog:
