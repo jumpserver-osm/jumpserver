@@ -102,8 +102,10 @@ class OperateLogStore(object):
         if op_log is not None:
             op_log_diff = op_log.diff or {}
             op_before, op_after = self.convert_diff_to_before_after(op_log_diff)
+            # One operation may emit several writes: keep its initial and final values.
             before.update(op_before)
-            after.update(op_after)
+            op_after.update(after)
+            after = op_after
         else:
             # 限制长度 128 OperateLog.resource.field.max_length, 避免存储失败
             max_length = 128

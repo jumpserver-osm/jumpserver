@@ -14,60 +14,62 @@ from audits.handler import (
     create_or_update_operate_log, get_instance_dict_from_cache
 )
 from audits.utils import model_to_dict_for_operate_log as model_to_dict
-from common.const.signals import POST_ADD, POST_REMOVE, POST_CLEAR, OP_LOG_SKIP_SIGNAL
+from common.const.signals import (
+    PRE_ADD, PRE_REMOVE, PRE_CLEAR, POST_ADD, POST_REMOVE, POST_CLEAR,
+    OP_LOG_SKIP_SIGNAL,
+)
 from common.signals import django_ready
 from jumpserver.utils import current_request
 from ..const import MODELS_NEED_RECORD, ActionChoices
 
-M2M_ACTION = {
-    POST_ADD: ActionChoices.create,
-    POST_REMOVE: ActionChoices.delete,
-    POST_CLEAR: ActionChoices.delete,
-}
+
+def _get_m2m_audit_field(sender, instance, reverse):
+    fields = instance._meta.related_objects if reverse else instance._meta.many_to_many
+    for relation in fields:
+        field = relation.field if reverse else relation
+        if field.remote_field.through is sender and not (reverse and relation.hidden):
+            accessor = relation.get_accessor_name() if reverse else field.name
+            label = relation.related_model._meta.verbose_name if reverse else field.verbose_name
+            return accessor, str(label)
+    return None, None
 
 
 @receiver(m2m_changed)
 def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
-    if action not in M2M_ACTION:
-        return
-    if not instance:
+    if instance is None or action not in (
+        PRE_ADD, PRE_REMOVE, PRE_CLEAR, POST_ADD, POST_REMOVE, POST_CLEAR
+    ):
         return
 
     with translation.override('en'):
-        resource_type = instance._meta.verbose_name
-        current_instance = model_to_dict(
-            instance, include_model_fields=False, include_related_fields=[model]
-        )
-
-        instance_id = current_instance.get('id')
-        log_id, before_instance = get_instance_dict_from_cache(instance_id)
-
-        field_name = str(model._meta.verbose_name)
-        pk_set = pk_set or {}
-        objs = model.objects.filter(pk__in=pk_set)
-        objs_display = [str(o) for o in objs]
-        action = M2M_ACTION[action]
-        changed_field = current_instance.get(field_name, {})
-        changed_value = changed_field.get('value', [])
-
-        after, before, before_value = None, None, None
-        if action == ActionChoices.create:
-            before_value = list(set(changed_value) - set(objs_display))
-        elif action == ActionChoices.delete:
-            before_value = list(set(changed_value).symmetric_difference(set(objs_display)))
-
-        if changed_field:
-            after = {field_name: changed_field}
-        if before_value:
-            before_change_field = changed_field.copy()
-            before_change_field['value'] = before_value
-            before = {field_name: before_change_field}
-
-        if sorted(str(before)) == sorted(str(after)):
+        accessor, field_name = _get_m2m_audit_field(sender, instance, reverse)
+        if accessor is None:
+            return
+        key = (sender, reverse, kwargs.get('using'))
+        snapshots = getattr(instance, '_operate_log_m2m_snapshots', {})
+        manager = getattr(instance, accessor)
+        if action in (PRE_ADD, PRE_REMOVE, PRE_CLEAR):
+            # clear() supplies no pk_set after deletion, so capture the actual relation first.
+            snapshots[key] = sorted(str(obj) for obj in manager.using(kwargs.get('using')).all())
+            instance._operate_log_m2m_snapshots = snapshots
             return
 
+        before_value = snapshots.pop(key, None)
+        if not snapshots and hasattr(instance, '_operate_log_m2m_snapshots'):
+            del instance._operate_log_m2m_snapshots
+        if before_value is None:
+            return
+        after_value = sorted(str(obj) for obj in manager.using(kwargs.get('using')).all())
+        if before_value == after_value:
+            return
+
+        current_instance = model_to_dict(instance, include_model_fields=False)
+        log_id, _ = get_instance_dict_from_cache(current_instance.get('id'))
+        before = {field_name: {'name': accessor, 'value': before_value}}
+        after = {field_name: {'name': accessor, 'value': after_value}}
+
         create_or_update_operate_log(
-            ActionChoices.update, resource_type,
+            ActionChoices.update, instance._meta.verbose_name,
             resource=instance, log_id=log_id, before=before, after=after
         )
 
