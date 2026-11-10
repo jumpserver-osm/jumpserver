@@ -8,6 +8,7 @@ import ast
 import copy
 import json
 import re
+from collections import defaultdict
 from contextlib import nullcontext
 from datetime import datetime
 from itertools import chain
@@ -72,8 +73,12 @@ DBStore = load('apps/audits/backends/db.py', ['OperateLogStore'], dict(
     _=lambda value: value, ActionChoices=choices, OperateLog=OperateLog,
 ))['OperateLogStore']
 ESStore = load('apps/audits/backends/es.py', ['OperateLogStore'], dict(
-    ES=object, Singleton=type,
+    ES=object, Singleton=type, uuid=__import__('uuid'),
+    local_now_display=lambda: '2026-11-10 12:00:00',
 ))['OperateLogStore']
+RelationMixin = load('apps/common/api/mixin.py', ['RelationMixin'], dict(
+    defaultdict=defaultdict, m2m_changed=m2m_changed,
+))['RelationMixin']
 
 signals = load('apps/audits/signal_handlers/operate_log.py', [
     '_get_m2m_audit_field', 'on_m2m_changed',

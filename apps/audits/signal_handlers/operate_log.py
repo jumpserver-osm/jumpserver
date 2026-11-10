@@ -57,9 +57,21 @@ def on_m2m_changed(sender, action, instance, reverse, model, pk_set, **kwargs):
         before_value = snapshots.pop(key, None)
         if not snapshots and hasattr(instance, '_operate_log_m2m_snapshots'):
             del instance._operate_log_m2m_snapshots
-        if before_value is None:
+        if before_value is None and (action not in (POST_ADD, POST_REMOVE) or not pk_set):
             return
-        after_value = sorted(str(obj) for obj in manager.using(kwargs.get('using')).all())
+        current_objects = list(manager.using(kwargs.get('using')).all())
+        after_value = sorted(str(obj) for obj in current_objects)
+        if before_value is None:
+            # Relation APIs write the through table directly and only emit post signals.
+            changed_ids = set(pk_set)
+            if action == POST_ADD:
+                before_value = sorted(str(obj) for obj in current_objects if obj.pk not in changed_ids)
+            else:
+                before_objects = {obj.pk: str(obj) for obj in current_objects}
+                removed = model._default_manager.using(kwargs.get('using')).filter(pk__in=changed_ids)
+                for obj in removed:
+                    before_objects.setdefault(obj.pk, str(obj))
+                before_value = sorted(before_objects.values())
         if before_value == after_value:
             return
 

@@ -4,7 +4,7 @@ import uuid
 import warnings
 from unittest.mock import Mock
 
-from support import DBStore, ESStore, cache, handler, signals, utils
+from support import DBStore, ESStore, RelationMixin, cache, handler, signals, utils
 from datetime import datetime
 from django.apps import apps
 from django.core.cache import CacheKeyWarning
@@ -17,6 +17,14 @@ from audit_test_app.models import (
 
 
 class AuditRegressionTests(unittest.TestCase):
+    relation_api_paths = [
+        (User, 'groups', 'User group'),
+        (AssetPermission, 'users', 'User'),
+        (AssetPermission, 'user_groups', 'User group'),
+        (AssetPermission, 'assets', 'Asset'),
+        (AssetPermission, 'nodes', 'Node'),
+    ]
+
     @classmethod
     def setUpClass(cls):
         cls.models = list(apps.get_app_config('audit_test_app').get_models())
@@ -99,6 +107,240 @@ class AuditRegressionTests(unittest.TestCase):
         if resource_type:
             self.assertEqual(log.resource_type, resource_type)
         return old, new
+
+    def relation_api(self, model, field):
+        return type('RelationAPI', (RelationMixin,), {
+            'm2m_field': model._meta.get_field(field),
+        })()
+
+    def create_relations(self, api, pairs, many=True):
+        meta = type('Meta', (), {
+            'model': api.through, 'fields': (api.from_field, api.to_field),
+        })
+        serializer_cls = type('RelationSerializer', (ModelSerializer,), {'Meta': meta})
+        data = [{api.from_field: instance.pk, api.to_field: member.pk}
+                for instance, member in pairs]
+        serializer = serializer_cls(data=data if many else data[0], many=many)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        api.perform_create(serializer)
+        self.assert_no_log_errors()
+        return serializer.instance if many else [serializer.instance]
+
+    def post_only_change(self, instance, accessor, action, members):
+        relation = instance._meta.get_field(accessor)
+        reverse = relation.auto_created
+        field = relation.field if reverse else relation
+        from_field, to_field = field.m2m_field_name(), field.m2m_reverse_field_name()
+        if reverse:
+            from_field, to_field = to_field, from_field
+        through = field.remote_field.through
+        if action == 'post_add':
+            through.objects.bulk_create([
+                through(**{from_field: instance, to_field: member}) for member in members
+            ])
+        else:
+            through.objects.filter(**{
+                from_field: instance, to_field + '__in': members,
+            }).delete()
+        m2m_changed.send(
+            sender=through, instance=instance, action=action, reverse=reverse,
+            model=relation.related_model, pk_set={member.pk for member in members},
+            using='default',
+        )
+        self.assert_no_log_errors()
+
+    def test_relation_api_add_and_remove_single_and_bulk(self):
+        for model, field, label in self.relation_api_paths:
+            for count in (1, 2):
+                for initial in ([], ['kept']):
+                    with self.subTest(model=model.__name__, field=field,
+                                      count=count, initial=initial):
+                        added = ['added-' + str(i) for i in range(count)]
+                        instance, members = self.prepare(model, field, initial, added)
+                        api = self.relation_api(model, field)
+                        relations = self.create_relations(
+                            api, [(instance, members[name]) for name in added], many=count > 1,
+                        )
+                        self.assert_log(label, initial, initial + added,
+                                        str(model._meta.verbose_name))
+                        log = OperateLog.objects.get()
+                        self.assertEqual(log.resource, str(instance))
+                        self.assertEqual(log.resource_id, str(instance.pk))
+                        self.assertEqual(log.action, 'update')
+                        remaining = initial + added
+                        for name, relation in zip(added, relations):
+                            self.reset_logs()
+                            previous = list(remaining)
+                            api.perform_destroy(relation)
+                            remaining.remove(name)
+                            self.assert_log(label, previous, remaining,
+                                            str(model._meta.verbose_name))
+                            self.assertEqual(
+                                sorted(getattr(instance, field).values_list('name', flat=True)),
+                                sorted(remaining),
+                            )
+                        self.assertFalse(hasattr(instance, '_operate_log_m2m_snapshots'))
+
+    def test_relation_api_batch_keeps_parent_resources_separate(self):
+        for model, field, label in self.relation_api_paths:
+            with self.subTest(model=model.__name__, field=field):
+                first, members = self.prepare(model, field, ['kept'], ['A', 'B'])
+                self.enabled = False
+                second = model.objects.create(name='second')
+                self.reset_logs()
+                self.enabled = True
+                api = self.relation_api(model, field)
+                self.create_relations(api, [
+                    (first, members['A']), (second, members['B']), (first, members['B']),
+                ])
+                self.assertEqual(OperateLog.objects.count(), 2)
+                for instance, before, after in [
+                    (first, ['kept'], ['A', 'B', 'kept']), (second, [], ['B']),
+                ]:
+                    log = OperateLog.objects.get(resource_id=str(instance.pk))
+                    self.assertEqual(DBStore.convert_diff_to_before_after(log.diff),
+                                     ({label: ','.join(before)}, {label: ','.join(after)}))
+                    self.assertEqual(log.resource_type, str(model._meta.verbose_name))
+                    self.assertEqual(sorted(getattr(instance, field).values_list('name', flat=True)),
+                                     after)
+
+    def test_relation_api_remove_without_preceding_add(self):
+        for model, field, label in self.relation_api_paths:
+            for initial in (['removed'], ['kept', 'removed']):
+                with self.subTest(model=model.__name__, field=field, initial=initial):
+                    instance, members = self.prepare(model, field, initial, [])
+                    api = self.relation_api(model, field)
+                    relation = api.through.objects.get(**{
+                        api.from_field: instance, api.to_field: members['removed'],
+                    })
+                    api.perform_destroy(relation)
+                    remaining = [name for name in initial if name != 'removed']
+                    self.assert_log(label, initial, remaining, str(model._meta.verbose_name))
+                    self.assertEqual(list(getattr(instance, field).values_list('name', flat=True)),
+                                     remaining)
+
+    def test_post_only_reverse_and_distinct_relations(self):
+        for model, field, label in [
+            (Group, 'users', 'User'),
+            (BackupPlan, 'recipients_one', 'Recipient one'),
+            (BackupPlan, 'recipients_two', 'Recipient two'),
+        ]:
+            with self.subTest(model=model.__name__, field=field):
+                instance, members = self.prepare(model, field, ['kept'], ['added'])
+                self.post_only_change(instance, field, 'post_add', [members['added']])
+                before, after = self.assert_log(label, ['kept'], ['added', 'kept'],
+                                               str(model._meta.verbose_name))
+                self.assertEqual(set(before), {label})
+                self.assertEqual(set(after), {label})
+                self.reset_logs()
+                self.post_only_change(instance, field, 'post_remove', list(members.values()))
+                self.assert_log(label, ['added', 'kept'], [], str(model._meta.verbose_name))
+                self.assertEqual(getattr(instance, field).count(), 0)
+                self.assertFalse(hasattr(instance, '_operate_log_m2m_snapshots'))
+
+    def test_post_only_duplicate_display_names_keep_distinct_ids(self):
+        for model, field, label in [(User, 'groups', 'User group'), (Group, 'users', 'User')]:
+            with self.subTest(model=model.__name__):
+                instance, members = self.prepare(model, field, ['same'], [])
+                self.enabled = False
+                duplicate = model._meta.get_field(field).related_model.objects.create(name='same')
+                self.reset_logs()
+                self.enabled = True
+                self.post_only_change(instance, field, 'post_add', [duplicate])
+                self.assert_log(label, ['same'], ['same', 'same'])
+                self.reset_logs()
+                self.post_only_change(instance, field, 'post_remove', [members['same']])
+                self.assert_log(label, ['same', 'same'], ['same'])
+                self.assertEqual(list(getattr(instance, field).values_list('pk', flat=True)),
+                                 [duplicate.pk])
+
+    def test_post_only_missing_changes_do_not_fabricate_logs(self):
+        instance, members = self.prepare(User, 'groups', ['kept'], ['unrelated'])
+        kwargs = dict(sender=User.groups.through, instance=instance, reverse=False,
+                      model=Group, using='default')
+        for action, pk_set in [
+            ('post_add', set()), ('post_remove', set()),
+            ('post_add', None), ('post_remove', None),
+            ('post_add', {-1}), ('post_remove', {-1}),
+            ('post_add', {members['unrelated'].pk}),
+            ('post_remove', {members['kept'].pk}),
+            ('post_clear', None),
+        ]:
+            with self.subTest(action=action, pk_set=pk_set):
+                m2m_changed.send(action=action, pk_set=pk_set, **kwargs)
+                self.assertEqual(OperateLog.objects.count(), 0)
+                self.assertFalse(hasattr(instance, '_operate_log_m2m_snapshots'))
+        self.assertEqual(list(instance.groups.values_list('pk', flat=True)), [members['kept'].pk])
+
+    def test_pre_snapshot_takes_priority_over_post_only_fallback(self):
+        instance, members = self.prepare(User, 'groups', ['A'], ['B'])
+        kwargs = dict(sender=User.groups.through, instance=instance, reverse=False,
+                      model=Group, using='default')
+        m2m_changed.send(action='pre_remove', pk_set={members['A'].pk}, **kwargs)
+        User.groups.through.objects.filter(user=instance, usergroup=members['A']).delete()
+        m2m_changed.send(action='post_remove', pk_set=set(), **kwargs)
+        self.assert_log('User group', ['A'], [])
+        self.assertFalse(hasattr(instance, '_operate_log_m2m_snapshots'))
+
+    def test_post_only_changes_reach_elasticsearch_with_correct_values(self):
+        for model, field, label in self.relation_api_paths:
+            with self.subTest(model=model.__name__, field=field):
+                instance, members = self.prepare(model, field, ['kept'], ['added'])
+                store = object.__new__(ESStore)
+                store.es = Mock()
+                store.index, store.doc_type = 'test', '_doc'
+                store.get = Mock(return_value=None)
+                store.ping = lambda timeout=None: True
+                handler.log_client = store
+                api = self.relation_api(model, field)
+                relations = self.create_relations(api, [(instance, members['added'])], many=False)
+                store.es.index.assert_called_once()
+                data = store.es.index.call_args.kwargs['body']
+                self.assertEqual(data['before'], {label: 'kept'})
+                self.assertEqual(data['after'], {label: 'added,kept'})
+                self.assertEqual(data['resource_type'], str(model._meta.verbose_name))
+                self.assertEqual(data['action'], 'update')
+                store.es.reset_mock()
+                api.perform_destroy(relations[0])
+                self.assert_no_log_errors()
+                store.es.index.assert_called_once()
+                data = store.es.index.call_args.kwargs['body']
+                self.assertEqual(data['before'], {label: 'added,kept'})
+                self.assertEqual(data['after'], {label: 'kept'})
+                self.assertEqual(list(getattr(instance, field).values_list('name', flat=True)), ['kept'])
+
+    def test_post_only_replacement_merges_initial_and_final_values_in_both_stores(self):
+        for backend in ('db', 'es'):
+            with self.subTest(backend=backend):
+                instance, members = self.prepare(User, 'groups', ['A'], ['B'])
+                # Save first to give both post-only events the same operation-log ID.
+                instance.save()
+                if backend == 'es':
+                    store = object.__new__(ESStore)
+                    store.es = Mock()
+                    store.index, store.doc_type = 'test', '_doc'
+                    store.ping = lambda timeout=None: True
+                    document = {}
+                    store.get = lambda query: copy.deepcopy(document) if document else None
+                    store.es.index.side_effect = lambda **kw: document.update(
+                        copy.deepcopy(kw['body']), es_id='doc-1',
+                    )
+                    store.es.update.side_effect = lambda **kw: document.update(
+                        copy.deepcopy(kw['body']['doc']),
+                    )
+                    handler.log_client = store
+                self.post_only_change(instance, 'groups', 'post_remove', [members['A']])
+                self.post_only_change(instance, 'groups', 'post_add', [members['B']])
+                if backend == 'db':
+                    self.assert_log('User group', ['A'], ['B'], 'User')
+                else:
+                    store.es.index.assert_called_once()
+                    store.es.update.assert_called_once()
+                    self.assertEqual(document['before'], {'User group': 'A'})
+                    self.assertEqual(document['after'], {'User group': 'B'})
+                    self.assertEqual(document['resource_type'], 'User')
+                self.assertEqual(list(instance.groups.values_list('pk', flat=True)), [members['B'].pk])
+                self.assertFalse(hasattr(instance, '_operate_log_m2m_snapshots'))
 
     def test_relation_edits_preserve_business_state_and_final_log(self):
         paths = [
