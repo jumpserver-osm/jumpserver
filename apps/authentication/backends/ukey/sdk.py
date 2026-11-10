@@ -180,9 +180,6 @@ class UKeySDKConfig:
             signing_steps[0]['call'] = provider.sdk_sign_method
             if provider.sdk_digest_from_certificate:
                 signing_steps[0]['digest_certificate'] = '{{ ukey.cert }}'
-                # Re-read the signing certificate after PIN, immediately before signing.
-                index = sdk_config['login']['steps'].index(signing_steps[0])
-                sdk_config['login']['steps'][index:index] = deepcopy(sdk_config['login']['detect']['steps'])
         if provider.uses_one_time_challenge:
             for step in sdk_config['login']['steps']:
                 if step.get('type') == 'submit':
