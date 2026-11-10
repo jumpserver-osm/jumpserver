@@ -3,9 +3,23 @@ import uuid
 from django.db import models
 
 
-class UserGroup(models.Model):
-    name = models.CharField(max_length=128, verbose_name='Name')
+class OrgModel(models.Model):
     org_id = models.CharField(max_length=36, default='org-1', verbose_name='Organization')
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        # Model OrgModelMixin.save(): a CharField holds org.id (UUID) in memory.
+        try:
+            self.org_id = uuid.UUID(str(self.org_id))
+        except ValueError:
+            pass
+        return super().save(*args, **kwargs)
+
+
+class UserGroup(OrgModel):
+    name = models.CharField(max_length=128, verbose_name='Name')
     comment = models.TextField(default='')
     created_by = models.CharField(max_length=128, default='admin')
     date_created = models.DateTimeField(auto_now_add=True)
@@ -83,7 +97,7 @@ class CommandGroup(NamedModel):
         verbose_name = 'Command group'
 
 
-class AssetPermission(NamedModel):
+class AssetPermission(NamedModel, OrgModel):
     users = models.ManyToManyField(User, verbose_name='User')
     user_groups = models.ManyToManyField(UserGroup, verbose_name='User group')
     assets = models.ManyToManyField(Asset, verbose_name='Asset')
@@ -100,7 +114,7 @@ class Role(NamedModel):
         verbose_name = 'Role'
 
 
-class CommandACL(NamedModel):
+class CommandACL(NamedModel, OrgModel):
     command_groups = models.ManyToManyField(CommandGroup, verbose_name='Command group')
     reviewers = models.ManyToManyField(User, verbose_name='Reviewers')
 
@@ -121,3 +135,14 @@ class BackupPlan(NamedModel):
 
     class Meta:
         verbose_name = 'Backup plan'
+
+
+class FieldValues(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    reference = models.CharField(max_length=36, verbose_name='Reference')
+    count = models.IntegerField(default=0, verbose_name='Count')
+    enabled = models.BooleanField(default=False, verbose_name='Enabled')
+    payload = models.JSONField(default=dict, verbose_name='Payload')
+    items = models.JSONField(default=list, verbose_name='Items')
+    kind = models.CharField(max_length=16, choices=[('test', 'Test')], verbose_name='Kind')
+    timestamp = models.DateTimeField(null=True, verbose_name='Timestamp')

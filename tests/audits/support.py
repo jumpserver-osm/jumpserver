@@ -14,6 +14,7 @@ from itertools import chain
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import UUID
 
 import django
 from django.conf import settings
@@ -33,7 +34,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelatio
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
-from django.db.models.signals import m2m_changed, pre_save, pre_delete, post_save
+from django.db.models.signals import m2m_changed, pre_save, pre_delete, post_save, post_delete
 from rest_framework import serializers
 from audit_test_app.models import OperateLog
 
@@ -50,7 +51,7 @@ def load(path, names, namespace):
 
 utils = load('apps/audits/utils.py', [
     '_get_instance_field_value', 'model_to_dict_for_operate_log',
-], dict(copy=copy, datetime=datetime, chain=chain, models=models,
+], dict(copy=copy, datetime=datetime, chain=chain, models=models, UUID=UUID,
         GenericForeignKey=GenericForeignKey, GenericRelation=GenericRelation,
         ObjectDoesNotExist=ObjectDoesNotExist, RelatedManager=type('RelatedManager', (), {}),
         as_current_tz=lambda value: value))
@@ -76,10 +77,10 @@ ESStore = load('apps/audits/backends/es.py', ['OperateLogStore'], dict(
 
 signals = load('apps/audits/signal_handlers/operate_log.py', [
     '_get_m2m_audit_field', 'on_m2m_changed',
-    'on_object_pre_create_or_update', 'on_object_created_or_update',
+    'on_object_pre_create_or_update', 'on_object_created_or_update', 'on_object_delete',
 ], dict(
     receiver=lambda *a, **k: lambda f: f, m2m_changed=m2m_changed,
-    pre_save=pre_save, pre_delete=pre_delete, post_save=post_save,
+    pre_save=pre_save, pre_delete=pre_delete, post_save=post_save, post_delete=post_delete,
     translation=SimpleNamespace(override=lambda _: nullcontext()),
     model_to_dict=utils['model_to_dict_for_operate_log'],
     PRE_ADD='pre_add', PRE_REMOVE='pre_remove', PRE_CLEAR='pre_clear',

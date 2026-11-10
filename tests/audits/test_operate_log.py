@@ -4,14 +4,15 @@ import uuid
 import warnings
 from unittest.mock import Mock
 
-from support import DBStore, ESStore, cache, handler, signals
+from support import DBStore, ESStore, cache, handler, signals, utils
+from datetime import datetime
 from django.apps import apps
 from django.core.cache import CacheKeyWarning
 from django.db import connection
-from django.db.models.signals import m2m_changed, pre_save, post_save
+from django.db.models.signals import m2m_changed, pre_save, post_save, pre_delete, post_delete
 from rest_framework.serializers import ModelSerializer
 from audit_test_app.models import (
-    User, Group, OperateLog, AssetPermission, Role, CommandACL, Host, BackupPlan,
+    User, Group, OperateLog, AssetPermission, Role, CommandACL, Host, BackupPlan, FieldValues,
 )
 
 
@@ -27,6 +28,8 @@ class AuditRegressionTests(unittest.TestCase):
                 continue
             pre_save.connect(signals['on_object_pre_create_or_update'], sender=model, weak=False)
             post_save.connect(signals['on_object_created_or_update'], sender=model, weak=False)
+            pre_delete.connect(signals['on_object_pre_create_or_update'], sender=model, weak=False)
+            post_delete.connect(signals['on_object_delete'], sender=model, weak=False)
             for field in model._meta.local_many_to_many:
                 m2m_changed.connect(signals['on_m2m_changed'], sender=field.remote_field.through, weak=False)
 
@@ -35,6 +38,8 @@ class AuditRegressionTests(unittest.TestCase):
         for model in cls.models:
             pre_save.disconnect(signals['on_object_pre_create_or_update'], sender=model)
             post_save.disconnect(signals['on_object_created_or_update'], sender=model)
+            pre_delete.disconnect(signals['on_object_pre_create_or_update'], sender=model)
+            post_delete.disconnect(signals['on_object_delete'], sender=model)
             for field in model._meta.local_many_to_many:
                 m2m_changed.disconnect(signals['on_m2m_changed'], sender=field.remote_field.through)
         with connection.schema_editor() as editor:
@@ -245,6 +250,121 @@ class AuditRegressionTests(unittest.TestCase):
         self.assertEqual(before['Organization'], 'org-1')
         self.assertEqual(after['Organization'], 'org-2')
         self.assertEqual(log.resource_type, 'User group')
+
+    def test_same_organization_type_change_is_not_an_update(self):
+        for model in (Group, AssetPermission, CommandACL):
+            with self.subTest(model=model.__name__):
+                self.enabled = False
+                org_id = str(uuid.uuid4())
+                instance = model.objects.create(name='unchanged', org_id=org_id)
+                instance.refresh_from_db()
+                self.assertIsInstance(instance.org_id, str)
+                self.reset_logs()
+                self.enabled = True
+                self.edit(instance, name='unchanged')
+                self.assertIsInstance(instance.org_id, uuid.UUID)
+                self.assertEqual(str(instance.org_id), org_id)
+                self.assertEqual(OperateLog.objects.count(), 0)
+
+    def test_relation_replacement_omits_unchanged_organization(self):
+        paths = [(Group, 'users', 'User'), (AssetPermission, 'users', 'User'),
+                 (AssetPermission, 'user_groups', 'User group'),
+                 (AssetPermission, 'assets', 'Asset'), (AssetPermission, 'nodes', 'Node'),
+                 (CommandACL, 'command_groups', 'Command group')]
+        for model, field, label in paths:
+            with self.subTest(model=model.__name__, field=field):
+                instance, members = self.prepare(model, field, ['A'], ['B'])
+                self.enabled = False
+                org_id = str(uuid.uuid4())
+                instance.org_id = org_id
+                instance.save()
+                instance.refresh_from_db()
+                self.reset_logs()
+                self.enabled = True
+                self.edit(instance, **{field: [members['B'].pk]})
+                before, after = self.assert_log(label, ['A'], ['B'], str(model._meta.verbose_name))
+                self.assertNotIn('Organization', before)
+                self.assertNotIn('Organization', after)
+                self.assertEqual(list(getattr(instance, field).values_list('name', flat=True)), ['B'])
+                instance.refresh_from_db()
+                self.assertEqual(instance.org_id, org_id)
+
+    def test_name_comment_and_real_organization_changes_are_preserved(self):
+        self.enabled = False
+        old_org, new_org = str(uuid.uuid4()), str(uuid.uuid4())
+        instance = Group.objects.create(name='old', comment='before', org_id=old_org)
+        instance.refresh_from_db()
+        self.reset_logs()
+        self.enabled = True
+        self.edit(instance, name='new', comment='after')
+        before, after = DBStore.convert_diff_to_before_after(OperateLog.objects.get().diff)
+        self.assertEqual(before, {'Name': 'old', 'comment': 'before'})
+        self.assertEqual(after, {'Name': 'new', 'comment': 'after'})
+        self.reset_logs()
+        instance.refresh_from_db()
+        self.edit(instance, org_id=new_org)
+        before, after = DBStore.convert_diff_to_before_after(OperateLog.objects.get().diff)
+        self.assertEqual(before, {'Organization': old_org})
+        self.assertEqual(after, {'Organization': new_org})
+        instance.refresh_from_db()
+        self.assertEqual(instance.org_id, new_org)
+
+    def test_snapshots_keep_organization_and_other_field_types(self):
+        org_id = uuid.uuid4()
+        snapshot = utils['model_to_dict_for_operate_log'](Group(org_id=org_id, name='new'))
+        self.assertEqual(snapshot['Organization'], {'name': 'org_id', 'value': str(org_id)})
+        instance = FieldValues(reference=org_id, kind='test', count=0, enabled=False,
+                               payload={'key': 1}, items=['A'], timestamp=datetime(2026, 11, 10, 12))
+        snapshot = utils['model_to_dict_for_operate_log'](instance)
+        self.assertIsInstance(instance.reference, uuid.UUID)
+        self.assertIs(snapshot['id']['value'], instance.pk)
+        self.assertEqual(snapshot['Reference']['value'], str(org_id))
+        self.assertIsInstance(snapshot['Count']['value'], int)
+        self.assertIs(snapshot['Enabled']['value'], False)
+        self.assertEqual(snapshot['Payload']['value'], {'key': 1})
+        self.assertIsNot(snapshot['Payload']['value'], instance.payload)
+        self.assertEqual(snapshot['Items']['value'], ['A'])
+        self.assertIsNot(snapshot['Items']['value'], instance.items)
+        self.assertEqual(snapshot['Kind']['value'], 'Test')
+        self.assertEqual(snapshot['Timestamp']['value'], '2026-11-10 12:00:00')
+
+    def test_actual_organization_changes_are_logged_for_all_org_models(self):
+        for model in (Group, AssetPermission, CommandACL):
+            with self.subTest(model=model.__name__):
+                self.enabled = False
+                old_org, new_org = str(uuid.uuid4()), str(uuid.uuid4())
+                instance = model.objects.create(name='moved', org_id=old_org)
+                instance.refresh_from_db()
+                self.reset_logs()
+                self.enabled = True
+                self.edit(instance, org_id=new_org)
+                before, after = DBStore.convert_diff_to_before_after(OperateLog.objects.get().diff)
+                self.assertEqual(before, {'Organization': old_org})
+                self.assertEqual(after, {'Organization': new_org})
+                instance.refresh_from_db()
+                self.assertEqual(instance.org_id, new_org)
+
+    def test_group_creation_keeps_organization(self):
+        self.enabled = True
+        org_id = uuid.uuid4()
+        Group.objects.create(name='created', org_id=str(org_id))
+        log = OperateLog.objects.get()
+        self.assertEqual(log.action, 'create')
+        _, after = DBStore.convert_diff_to_before_after(log.diff)
+        self.assertEqual(after['Organization'], str(org_id))
+
+    def test_group_deletion_keeps_organization(self):
+        self.enabled = False
+        org_id = uuid.uuid4()
+        instance = Group.objects.create(name='deleted', org_id=str(org_id))
+        instance.refresh_from_db()
+        self.reset_logs()
+        self.enabled = True
+        instance.delete()
+        log = OperateLog.objects.get()
+        self.assertEqual(log.action, 'delete')
+        before, _ = DBStore.convert_diff_to_before_after(log.diff)
+        self.assertEqual(before['Organization'], str(org_id))
 
     def test_merge_contract_database_and_es(self):
         sequences = [
