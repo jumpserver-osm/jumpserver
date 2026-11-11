@@ -17,6 +17,7 @@ from assets import serializers
 from assets.exceptions import NotSupportedTemporarilyError
 from assets.filters import IpInFilterBackend, NodeFilterBackend, parse_protocol_filters
 from assets.models import Asset, Gateway, Platform, Protocol
+from assets.serializers.asset.template_definition import host_import_template, HOST_EXAMPLE_ACCOUNTS
 from assets.tasks import test_assets_connectivity_manual, update_assets_hardware_info_manual
 from common.api import SuggestionMixin
 from common.drf.filters import BaseFilterSet, AttrRulesFilterBackend
@@ -188,7 +189,22 @@ class BaseAssetViewSet(OrgBulkModelViewSet):
             example_row = import_template.get_example_row() if import_template else None
             if example_row is not None:
                 return Response([example_row])
-        return super().list(request, *args, **kwargs)
+
+        response = super().list(request, *args, **kwargs)
+
+        is_update_template = (
+            request.query_params.get('template') == 'update'
+            and request.query_params.get('format') in ('csv', 'xlsx')
+        )
+        if is_update_template:
+            serializer_meta = getattr(self.get_serializer_class(), 'Meta', None)
+            if getattr(serializer_meta, 'import_template', None) is host_import_template:
+                # accounts 是 write_only 字段，列表数据中没有，更新模板与创建模板保持同一固定示例
+                data = response.data
+                rows = data.get('results', []) if isinstance(data, dict) else data
+                for row in rows:
+                    row['accounts'] = HOST_EXAMPLE_ACCOUNTS
+        return response
 
     def create(self, request, *args, **kwargs):
         if request.path.find('/api/v1/assets/assets/') > -1:
