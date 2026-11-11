@@ -235,6 +235,12 @@ def _comment_column(max_length=512):
 # Host template — corresponds to asset_hosts.xlsx
 # ============================================================
 
+# 主机创建/更新模板“帐号信息”列的固定示例
+HOST_EXAMPLE_ACCOUNTS = (
+    '[{"帐号名":"root","帐号密码":"Root@1234","是否是特权帐号":"是"},'
+    '{"帐号名":"ops","帐号密码":"Ops@12345","是否是特权帐号":"否"}]'
+)
+
 host_import_template = AssetImportTemplate(
     columns=[
         _id_column(),
@@ -264,7 +270,7 @@ host_import_template = AssetImportTemplate(
         'platform': 'Linux',
         'nodes_display': '/Default/example-node',
         'protocols': 'ssh/22',
-        'accounts': '',
+        'accounts': HOST_EXAMPLE_ACCOUNTS,
         'zone': '',
         'labels': '["environment:test"]',
         'is_active': True,
