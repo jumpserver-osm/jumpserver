@@ -1,6 +1,7 @@
 import copy
 from datetime import datetime
 from itertools import chain
+from uuid import UUID
 
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.core.exceptions import ObjectDoesNotExist
@@ -58,6 +59,10 @@ def _get_instance_field_value(
                 continue
             if not isinstance(value, (bool, int)) and not value:
                 continue
+
+            # CharFields read back as strings, even if save() assigned a UUID in memory.
+            if isinstance(f, models.CharField) and isinstance(value, UUID):
+                value = str(value)
 
             choices = getattr(f, 'choices', []) or []
             for c_value, c_label in choices:

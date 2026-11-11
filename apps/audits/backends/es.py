@@ -70,9 +70,9 @@ class OperateLogStore(ES, metaclass=Singleton):
             data = {'doc': {}}
             raw_after = op_log.get('after') or {}
             raw_before = op_log.get('before') or {}
-            raw_before.update(before)
+            before.update(raw_before)
             raw_after.update(after)
-            data['doc']['before'] = raw_before
+            data['doc']['before'] = before
             data['doc']['after'] = raw_after
             self.es.update(
                 index=self.index, doc_type=self.doc_type,
