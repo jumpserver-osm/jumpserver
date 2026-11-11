@@ -9,7 +9,8 @@ import copy
 import json
 import re
 from collections import defaultdict
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
@@ -37,7 +38,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import models, transaction
 from django.db.models.signals import m2m_changed, pre_save, pre_delete, post_save, post_delete
 from rest_framework import serializers
-from audit_test_app.models import OperateLog
+from audit_test_app.models import OperateLog, User
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,6 +60,12 @@ utils = load('apps/audits/utils.py', [
 
 choices = SimpleNamespace(update='update', create='create', delete='delete')
 request = SimpleNamespace(user=SimpleNamespace(is_authenticated=True, is_service_account=False))
+syslog_ns = load('apps/audits/syslog.py', [
+    'replacing_relation_syslog', 'write_group_membership_syslog',
+], dict(__package__='audits', contextmanager=contextmanager,
+        relation_syslog=ContextVar('test_relation_syslog', default=False),
+        uuid4=__import__('uuid').uuid4, logger=Mock(),
+        data_to_json=lambda data, **kwargs: json.dumps(data, default=str)))
 handler_ns = load('apps/audits/handler.py', ['OperatorLogHandler'], dict(
     Singleton=type, datetime=datetime, as_current_tz=lambda value: value,
     similar_encrypted_pattern=re.compile('password|secret|token'),
@@ -67,6 +74,25 @@ handler_ns = load('apps/audits/handler.py', ['OperatorLogHandler'], dict(
     Organization=SimpleNamespace(SYSTEM_ID='system', DEFAULT_ID='org-1'),
     get_current_org_id=lambda: 'org-1', Setting=type('Setting', (), {}),
     Preference=type('Preference', (), {}), logger=Mock(),
+    replacing_relation_syslog=syslog_ns['replacing_relation_syslog'],
+    write_group_membership_syslog=Mock(),
+))
+
+labeled_field = load('apps/common/serializers/fields.py', ['LabeledChoiceField'], dict(
+    serializers=serializers,
+))['LabeledChoiceField']
+operate_serializer = load('apps/audits/serializers.py', ['OperateLogSerializer'], dict(
+    BulkOrgResourceModelSerializer=serializers.ModelSerializer, serializers=serializers,
+    LabeledChoiceField=labeled_field, ActionChoices=SimpleNamespace(choices=OperateLog._meta.get_field('action').choices),
+    models=SimpleNamespace(OperateLog=OperateLog), _=lambda value: value, i18n_trans=lambda value: value,
+))['OperateLogSerializer']
+other_ns = load('apps/audits/signal_handlers/other.py', ['on_audits_log_create'], dict(
+    OperateLog=OperateLog, OperateLogSerializer=operate_serializer,
+    UserLoginLog=type('UserLoginLog', (), {}), FTPLog=type('FTPLog', (), {}),
+    PasswordChangeLog=type('PasswordChangeLog', (), {}), Session=type('Session', (), {}),
+    Command=type('Command', (), {}), sys_logger=Mock(),
+    relation_syslog=syslog_ns['relation_syslog'],
+    data_to_json=lambda data, **kwargs: json.dumps(data, default=str),
 ))
 handler = object.__new__(handler_ns['OperatorLogHandler'])
 DBStore = load('apps/audits/backends/db.py', ['OperateLogStore'], dict(
@@ -81,7 +107,7 @@ RelationMixin = load('apps/common/api/mixin.py', ['RelationMixin'], dict(
 ))['RelationMixin']
 
 signals = load('apps/audits/signal_handlers/operate_log.py', [
-    '_get_m2m_audit_field', 'on_m2m_changed',
+    '_get_m2m_audit_field', '_group_membership_relations', 'on_m2m_changed',
     'on_object_pre_create_or_update', 'on_object_created_or_update', 'on_object_delete',
 ], dict(
     receiver=lambda *a, **k: lambda f: f, m2m_changed=m2m_changed,
@@ -97,4 +123,5 @@ signals = load('apps/audits/signal_handlers/operate_log.py', [
     create_or_update_operate_log=handler.create_or_update_operate_log,
     signal_of_operate_log_whether_continue=lambda *a: False,
     uuid=__import__('uuid'),
+    apps=SimpleNamespace(get_model=lambda *args: __import__('audit_test_app.models', fromlist=['User']).User),
 ))
