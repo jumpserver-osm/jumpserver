@@ -2192,6 +2192,10 @@ msgstr "如果密碼以 `{{` 開始，並且以 `}}` 結束，則該密碼是不
 msgid "Username contains invalid characters: %(chars)s"
 msgstr "使用者名稱包含非法字元：%(chars)s"
 
+#: users/validators.py:9
+msgid "The username is non-compliant"
+msgstr "使用者名稱不合規"
+
 #: accounts/utils.py:84
 msgid "private key invalid or passphrase error"
 msgstr "金鑰不合法或金鑰密碼錯誤"

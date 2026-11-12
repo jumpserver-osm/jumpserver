@@ -2247,6 +2247,10 @@ msgstr ""
 msgid "Username contains invalid characters: %(chars)s"
 msgstr "ユーザー名に無効な文字が含まれています: %(chars)s"
 
+#: users/validators.py:9
+msgid "The username is non-compliant"
+msgstr "ユーザー名が規則に適合していません"
+
 #: accounts/utils.py:84
 msgid "private key invalid or passphrase error"
 msgstr "秘密鍵が無効またはpassphraseエラー"

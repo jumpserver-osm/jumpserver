@@ -2087,6 +2087,10 @@ msgstr ""
 msgid "Username contains invalid characters: %(chars)s"
 msgstr "O nome de usuário contém caracteres inválidos: %(chars)s"
 
+#: users/validators.py:9
+msgid "The username is non-compliant"
+msgstr "O nome de usuário não está em conformidade"
+
 #: accounts/utils.py:84
 msgid "private key invalid or passphrase error"
 msgstr "Chave inválida ou erro de senha da chave"

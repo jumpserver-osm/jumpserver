@@ -31,7 +31,7 @@ from common.utils import (
 )
 from users.models import User
 from users.utils import LoginBlockUtil, MFABlockUtils, LoginIpBlockUtil
-from users.validators import get_validation_error_message
+from users.validators import get_validation_error_message, get_login_error_message
 from . import errors
 from .signals import post_auth_success, post_auth_failed
 
@@ -172,10 +172,9 @@ def authenticate(request=None, **credentials):
                 )
             continue
         except ValidationError as e:
-            error_msg = get_validation_error_message(e)
-            logger.warning('Authenticate failed: {}'.format(error_msg))
+            logger.warning('Authenticate failed: {}'.format(get_validation_error_message(e)))
             if request:
-                request.error_message = error_msg
+                request.error_message = get_login_error_message(e)
             continue
         except Exception as e:
             logger.error('Authenticate failed: {}'.format(e))

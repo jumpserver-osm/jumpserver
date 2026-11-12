@@ -5,7 +5,7 @@ from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from common.utils import get_logger
-from users.validators import get_validation_error_message
+from users.validators import get_validation_error_message, get_login_error_message
 from .base import JMSBaseAuthBackend
 
 logger = get_logger(__file__)
@@ -44,10 +44,9 @@ class CustomAuthBackend(JMSBaseAuthBackend):
             )
             user, created = self.get_or_create_user_from_userinfo(userinfo)
         except ValidationError as e:
-            error_msg = get_validation_error_message(e)
-            logger.warning('Custom authenticate failed: {}'.format(error_msg))
+            logger.warning('Custom authenticate failed: {}'.format(get_validation_error_message(e)))
             if request:
-                request.error_message = error_msg
+                request.error_message = get_login_error_message(e)
             return None
         except Exception as e:
             logger.error('Custom authenticate error: {}'.format(e))
