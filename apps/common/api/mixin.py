@@ -6,8 +6,11 @@ from itertools import chain
 from typing import Callable
 
 from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.db.models.signals import m2m_changed
+from django.http import Http404
+from rest_framework.generics import get_object_or_404
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -103,7 +106,23 @@ class QuerySetMixin:
         pk = self.kwargs.get(self.lookup_field)
         if not pk or is_uuid(pk) or pk.isdigit():
             return super().get_object()
-        return self.get_queryset().get(**{self.slug_field: pk})
+
+        queryset = self.get_queryset()
+        model = getattr(queryset, 'model', None)
+        if model is None or not self._model_has_field(model, self.slug_field):
+            raise Http404
+        queryset = self.filter_queryset(queryset)
+        obj = get_object_or_404(queryset, **{self.slug_field: pk})
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    @staticmethod
+    def _model_has_field(model, field_name):
+        try:
+            model._meta.get_field(field_name)
+        except FieldDoesNotExist:
+            return False
+        return True
 
     def limit_queryset_if_no_page(self, queryset):
         if self.request.query_params.get('format') in ['csv', 'xlsx']:

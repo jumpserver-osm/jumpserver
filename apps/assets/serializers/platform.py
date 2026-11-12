@@ -236,7 +236,10 @@ class PlatformSerializer(ResourceLabelsMixin, CommonSerializerMixin, WritableNes
         if self.instance:
             return self.instance.category, self.instance.type
         if self.initial_data:
-            return self.initial_data.get('category'), self.initial_data.get('type')
+            category = self.initial_data.get('category')
+            tp = self.initial_data.get('type')
+            if category and tp:
+                return category, tp
         raise serializers.ValidationError({'type': _("type is required")})
 
     def add_type_choices(self, name, label):
@@ -269,7 +272,7 @@ class PlatformSerializer(ResourceLabelsMixin, CommonSerializerMixin, WritableNes
     def validate_automation(self, automation):
         automation = automation or {}
         ansible_enabled = automation.get('ansible_enabled', False) \
-                          and self.constraints['automation'].get('ansible_enabled', False)
+                          and self.constraints.get('automation', {}).get('ansible_enabled', False)
         automation['ansible_enable'] = ansible_enabled
         return automation
 

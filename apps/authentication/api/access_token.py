@@ -1,7 +1,7 @@
-from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext as _
 
 from rest_framework.decorators import action
+from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.status import HTTP_204_NO_CONTENT, HTTP_404_NOT_FOUND
 

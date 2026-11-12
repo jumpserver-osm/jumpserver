@@ -2,7 +2,10 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
-from rest_framework.generics import ListAPIView, CreateAPIView
+from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
+from rest_framework.fields import empty
+from rest_framework.generics import ListAPIView, CreateAPIView, get_object_or_404
 from rest_framework.views import Response
 from rest_framework_bulk.generics import BulkModelViewSet
 
@@ -35,9 +38,16 @@ class BlockIPSecurityAPI(ListAPIView):
 
     def get_page_offset_and_limit(self):
         get_params = self.request.GET
-        offset = get_params.get('offset', 0)
-        limit = get_params.get('limit', 15)
-        return int(offset), int(limit)
+        offset = self.get_non_negative_int(get_params, 'offset', 0)
+        limit = self.get_non_negative_int(get_params, 'limit', 15)
+        return offset, limit
+
+    @staticmethod
+    def get_non_negative_int(params, name, default):
+        try:
+            return serializers.IntegerField(min_value=0).run_validation(params.get(name, default))
+        except ValidationError as e:
+            raise ValidationError({name: e.detail})
 
     def list(self, request, *args, **kwargs):
         ips = self.get_ips()
@@ -56,7 +66,11 @@ class UnlockIPSecurityAPI(CreateAPIView):
     }
 
     def create(self, request, *args, **kwargs):
-        ips = request.data.get('ips')
+        ips_field = serializers.ListField(child=serializers.CharField(), allow_empty=False)
+        try:
+            ips = ips_field.run_validation(request.data.get('ips', empty))
+        except ValidationError as e:
+            raise ValidationError({'ips': e.detail})
         for ip in ips:
             LoginIpBlockUtil(ip).clean_block_if_need()
         return Response(status=200)
@@ -74,7 +88,7 @@ class LeakPasswordViewSet(BulkModelViewSet, RenderToJsonMixin):
     def get_object(self):
         pk = self.kwargs.get('pk')
         if pk:
-            return self.get_queryset().get(id=pk)
+            return get_object_or_404(self.get_queryset(), id=pk)
         return super().get_object()
 
     def get_queryset(self):

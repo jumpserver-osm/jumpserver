@@ -336,7 +336,7 @@ class UsernameHintsAPI(APIView):
             return Response(data=[])
         node_ids = request.data.get('nodes', [])
         asset_ids = request.data.get('assets', [])
-        query = request.data.get('query', None)
+        query = request.data.get('query') or ''
 
         assets = list(Asset.objects.filter(id__in=asset_ids).all())
 

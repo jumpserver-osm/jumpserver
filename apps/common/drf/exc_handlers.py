@@ -1,7 +1,10 @@
 import traceback
 from logging import getLogger
 
-from django.core.exceptions import PermissionDenied, ObjectDoesNotExist as DJObjectDoesNotExist
+from django.core.exceptions import (
+    PermissionDenied, ObjectDoesNotExist as DJObjectDoesNotExist,
+    ValidationError as DJValidationError
+)
 from django.db.models.deletion import ProtectedError
 from django.http import Http404
 from django.utils.translation import gettext
@@ -42,6 +45,9 @@ def common_exception_handler(exc, context):
         exc = JMSObjectDoesNotExist(object_name=extract_object_name(exc, 0))
     elif isinstance(exc, ProtectedError):
         exc = ReferencedByOthers()
+    elif isinstance(exc, DJValidationError):
+        detail = exc.message_dict if hasattr(exc, 'error_dict') else exc.messages
+        exc = exceptions.ValidationError(detail=detail)
 
     if isinstance(exc, exceptions.APIException):
         headers = {}

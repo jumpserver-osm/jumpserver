@@ -111,7 +111,7 @@ class AppletHostSerializer(HostSerializer):
         }
 
     def __init__(self, *args, data=None, **kwargs):
-        if data:
+        if data is not None:
             self.set_initial_data(data)
             kwargs['data'] = data
         super().__init__(*args, **kwargs)

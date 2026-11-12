@@ -142,9 +142,11 @@ def auth_begin(request):
 
 def auth_complete(request):
     server = get_server(request)
-    data = request.data.get("passkeys")
-    data = json.loads(data)
-    cid = data['id']
+    try:
+        data = json.loads(request.data.get("passkeys"))
+        cid = data['id']
+    except (TypeError, ValueError, KeyError):
+        raise ValueError(_('Auth failed'))
 
     key = Passkey.objects.filter(credential_id=cid, is_active=True).first()
     if not key:
