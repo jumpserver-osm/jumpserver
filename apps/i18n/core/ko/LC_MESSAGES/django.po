@@ -1845,6 +1845,10 @@ msgstr ""
 msgid "Username contains invalid characters: %(chars)s"
 msgstr "사용자 이름에 유효하지 않은 문자가 포함되어 있습니다: %(chars)s"
 
+#: users/validators.py:9
+msgid "The username is non-compliant"
+msgstr "사용자 이름이 규정에 맞지 않습니다"
+
 #: accounts/utils.py:84
 msgid "private key invalid or passphrase error"
 msgstr "키가 불법이거나 키 비밀번호 오류"

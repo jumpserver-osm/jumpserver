@@ -20,7 +20,7 @@ from django.urls import reverse
 from authentication.utils import build_absolute_uri_for_oidc
 from common.utils import get_logger
 from users.utils import construct_user_email
-from users.validators import get_validation_error_message
+from users.validators import get_validation_error_message, get_login_error_message
 from .decorator import ssl_verification
 from .signals import (
     openid_create_or_update_user
@@ -230,10 +230,9 @@ class OIDCAuthPasswordBackend(OIDCBaseBackendMixin, JMSBaseAuthBackend, ModelBac
         try:
             return self._authenticate(request, username, password)
         except ValidationError as e:
-            error_msg = get_validation_error_message(e)
-            logger.warning('Authenticate failed: {}'.format(error_msg))
+            logger.warning('Authenticate failed: {}'.format(get_validation_error_message(e)))
             if request:
-                request.error_message = error_msg
+                request.error_message = get_login_error_message(e)
             return None
         except Exception as e:
             error = f'Authenticate exception: {e}'

@@ -19,7 +19,7 @@ from authentication.const import (
 )
 from common.utils import get_logger
 from rbac.models import SystemRole, SystemRoleBinding
-from users.validators import get_validation_error_message
+from users.validators import get_validation_error_message, get_login_error_message
 from ..mixins import AuthMixin
 
 __all__  = ['CustomSSOLoginAPIView']
@@ -139,7 +139,8 @@ class CustomSSOLoginAPIView(AuthMixin, RetrieveAPIView):
             user = self.get_or_create_user_from_userinfo(userinfo)
             return user, ''
         except ValidationError as e:
-            return None, get_validation_error_message(e)
+            logger.warning('Custom SSO get or create user failed: {}'.format(get_validation_error_message(e)))
+            return None, get_login_error_message(e)
         except Exception as e:
             error = f'Custom SSO get or create user error: {e}'
             return None, error

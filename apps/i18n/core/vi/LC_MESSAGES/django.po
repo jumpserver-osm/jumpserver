@@ -1877,6 +1877,10 @@ msgstr ""
 msgid "Username contains invalid characters: %(chars)s"
 msgstr "Tên người dùng chứa ký tự không hợp lệ: %(chars)s"
 
+#: users/validators.py:9
+msgid "The username is non-compliant"
+msgstr "Tên người dùng không hợp lệ"
+
 #: accounts/utils.py:84
 msgid "private key invalid or passphrase error"
 msgstr "Khóa không hợp lệ hoặc mật khẩu của khóa sai"
